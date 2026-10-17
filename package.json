@@ -25,6 +25,10 @@
       {
         "command": "autoDoc.generateDocs",
         "title": "Generate Documentation"
+      },
+      {
+        "command": "autoDoc.generateProjectDocs",
+        "title": "Generate Project Documentation"
       }
     ]
   },
