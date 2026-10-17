@@ -16,6 +16,10 @@
     {
       "command": "autoDoc.addComment",
       "title": "Add Doc Comment"
+    },
+    {
+      "command": "autoDoc.generateDocs",
+      "title": "Generate Documentation"
     }
   ]
 },

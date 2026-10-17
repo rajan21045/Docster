@@ -100,6 +100,60 @@ class DocFixProvider implements vscode.CodeActionProvider {
   }
 }
 
+function getDescription(doc: vscode.TextDocument, fnLine: number): string {
+  if (!hasComment(doc, fnLine)) {
+    return '';
+  }
+  const lines: string[] = [];
+  for (let i = fnLine - 1; i >= 0; i--) {
+    const t = doc.lineAt(i).text.trim();
+    if (t.startsWith('/**')) {
+      break;
+    }
+    const clean = t.replace(/^\*+\/?\s?/, '').trim();
+    if (clean && !clean.startsWith('@') && !clean.startsWith('Description of ')) {
+      lines.unshift(clean);
+    }
+  }
+  return lines.join(' ');
+}
+
+async function generateDocs() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+  const doc = editor.document;
+  const fileName = doc.uri.path.split('/').pop();
+  let md = `# ${fileName}\n\n`;
+  let count = 0;
+
+  for (let i = 0; i < doc.lineCount; i++) {
+    const fn = parseFunction(doc.lineAt(i).text);
+    if (!fn) {
+      continue;
+    }
+    count++;
+    const description = getDescription(doc, i) || '_No description yet._';
+    md += `## ${fn.name}(${fn.params.join(', ')})\n\n${description}\n\n`;
+    if (fn.params.length) {
+      md += '**Parameters**\n\n';
+      md += fn.params.map(p => `- \`${p}\``).join('\n') + '\n\n';
+    }
+  }
+
+  if (count === 0) {
+    vscode.window.showWarningMessage('No functions found in this file.');
+    return;
+  }
+
+  const out = await vscode.workspace.openTextDocument({
+    content: md,
+    language: 'markdown',
+  });
+  await vscode.window.showTextDocument(out, vscode.ViewColumn.Beside);
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection('auto-doc');
 
@@ -124,6 +178,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     collection,
     cmd,
+    vscode.commands.registerCommand('autoDoc.generateDocs', generateDocs),
     vscode.languages.registerCodeActionsProvider(LANGUAGES, new DocFixProvider(), {
       providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
     }),
