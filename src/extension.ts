@@ -1,57 +1,244 @@
 import * as vscode from 'vscode';
 
-const LANGUAGES = ['javascript', 'typescript'];
-
-const FUNCTION_PATTERNS = [
-  /function\s+(\w+)\s*\(([^)]*)\)/,
-  /(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/,
-];
-
 interface ParsedFunction {
   name: string;
   params: string[];
 }
 
-function parseFunction(text: string): ParsedFunction | undefined {
-  for (const pattern of FUNCTION_PATTERNS) {
-    const m = text.match(pattern);
-    if (m) {
-      const params = m[2]
-        .split(',')
-        .map(p => p.trim().split(/[:=]/)[0].trim())
-        .filter(Boolean);
-      return { name: m[1], params };
-    }
+interface LangSupport {
+  ids: string[];
+  parse(text: string): ParsedFunction | undefined;
+  hasComment(doc: vscode.TextDocument, line: number): boolean;
+  build(indent: string, fn: ParsedFunction): string;
+  insertPosition(doc: vscode.TextDocument, line: number): vscode.Position;
+  description(doc: vscode.TextDocument, line: number): string;
+}
+
+const PLACEHOLDER = 'Description of ';
+
+// Moves up past lines like @override or @staticmethod
+function firstLineAboveDecorators(doc: vscode.TextDocument, line: number): number {
+  let l = line;
+  while (l > 0 && doc.lineAt(l - 1).text.trim().startsWith('@')) {
+    l--;
   }
-  return undefined;
+  return l;
 }
 
-function buildComment(indent: string, fn: ParsedFunction): string {
-  return (
-    `${indent}/**\n` +
-    `${indent} * Description of ${fn.name}\n` +
-    `${indent} *\n` +
-    fn.params.map(p => `${indent} * @param ${p}\n`).join('') +
-    `${indent} * @returns\n` +
-    `${indent} */\n`
-  );
+// ---------- JavaScript / TypeScript ----------
+
+const JS_PATTERNS = [
+  /function\s+(\w+)\s*\(([^)]*)\)/,
+  /(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/,
+];
+
+const jsSupport: LangSupport = {
+  ids: ['javascript', 'typescript', 'javascriptreact', 'typescriptreact'],
+
+  parse(text) {
+    for (const pattern of JS_PATTERNS) {
+      const m = text.match(pattern);
+      if (m) {
+        const params = m[2]
+          .split(',')
+          .map(p => p.trim().split(/[:=]/)[0].trim())
+          .filter(Boolean);
+        return { name: m[1], params };
+      }
+    }
+    return undefined;
+  },
+
+  hasComment(doc, line) {
+    return line > 0 && doc.lineAt(line - 1).text.trim().endsWith('*/');
+  },
+
+  build(indent, fn) {
+    return (
+      `${indent}/**\n` +
+      `${indent} * ${PLACEHOLDER}${fn.name}\n` +
+      `${indent} *\n` +
+      fn.params.map(p => `${indent} * @param ${p}\n`).join('') +
+      `${indent} * @returns\n` +
+      `${indent} */\n`
+    );
+  },
+
+  insertPosition(_doc, line) {
+    return new vscode.Position(line, 0);
+  },
+
+  description(doc, line) {
+    if (!this.hasComment(doc, line)) {
+      return '';
+    }
+    const lines: string[] = [];
+    for (let i = line - 1; i >= 0; i--) {
+      const t = doc.lineAt(i).text.trim();
+      if (t.startsWith('/**')) {
+        break;
+      }
+      const clean = t.replace(/^\*+\/?\s?/, '').trim();
+      if (clean && !clean.startsWith('@') && !clean.startsWith(PLACEHOLDER)) {
+        lines.unshift(clean);
+      }
+    }
+    return lines.join(' ');
+  },
+};
+
+// ---------- Dart ----------
+
+const DART_PATTERN =
+  /^\s*(?:static\s+)?[\w<>?,.[\]]+\s+(\w+)\s*\(([^)]*)\)\s*(?:async\*?\s*|sync\*\s*)?(?:\{|=>)/;
+const DART_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return'];
+
+function parseDartParams(raw: string): string[] {
+  return raw
+    .replace(/[{}[\]]/g, '')
+    .split(',')
+    .map(p => p.split('=')[0].trim())
+    .map(p => p.split(/\s+/).pop() ?? '')
+    .map(p => p.replace(/^this\./, ''))
+    .filter(Boolean);
 }
 
-function hasComment(doc: vscode.TextDocument, line: number): boolean {
-  return line > 0 && doc.lineAt(line - 1).text.trim().endsWith('*/');
+const dartSupport: LangSupport = {
+  ids: ['dart'],
+
+  parse(text) {
+    const m = text.match(DART_PATTERN);
+    if (!m || DART_SKIP.includes(m[1])) {
+      return undefined;
+    }
+    return { name: m[1], params: parseDartParams(m[2]) };
+  },
+
+  hasComment(doc, line) {
+    const l = firstLineAboveDecorators(doc, line);
+    return l > 0 && doc.lineAt(l - 1).text.trim().startsWith('///');
+  },
+
+  build(indent, fn) {
+    let s = `${indent}/// ${PLACEHOLDER}${fn.name}\n`;
+    if (fn.params.length) {
+      s += `${indent}///\n`;
+      s += fn.params.map(p => `${indent}/// - [${p}]:\n`).join('');
+    }
+    return s;
+  },
+
+  insertPosition(doc, line) {
+    return new vscode.Position(firstLineAboveDecorators(doc, line), 0);
+  },
+
+  description(doc, line) {
+    const lines: string[] = [];
+    let i = firstLineAboveDecorators(doc, line) - 1;
+    while (i >= 0 && doc.lineAt(i).text.trim().startsWith('///')) {
+      const clean = doc.lineAt(i).text.trim().replace(/^\/\/\/\s?/, '').trim();
+      if (clean && !clean.startsWith('- [') && !clean.startsWith(PLACEHOLDER)) {
+        lines.unshift(clean);
+      }
+      i--;
+    }
+    return lines.join(' ');
+  },
+};
+
+// ---------- Python ----------
+
+const PY_PATTERN = /^\s*(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)/;
+
+const pySupport: LangSupport = {
+  ids: ['python'],
+
+  parse(text) {
+    const m = text.match(PY_PATTERN);
+    if (!m) {
+      return undefined;
+    }
+    const params = m[2]
+      .split(',')
+      .map(p => p.split(/[:=]/)[0].trim().replace(/^\*+/, ''))
+      .filter(p => p && p !== 'self' && p !== 'cls' && p !== '/');
+    return { name: m[1], params };
+  },
+
+  // Python docstrings go INSIDE the function, right after the def line
+  hasComment(doc, line) {
+    if (line + 1 >= doc.lineCount) {
+      return false;
+    }
+    const next = doc.lineAt(line + 1).text.trim();
+    return /^[rRuU]?("""|''')/.test(next);
+  },
+
+  build(indent, fn) {
+    const inner = indent + '    ';
+    let s = `${inner}"""${PLACEHOLDER}${fn.name}\n`;
+    if (fn.params.length) {
+      s += `\n${inner}Args:\n`;
+      s += fn.params.map(p => `${inner}    ${p}:\n`).join('');
+    }
+    s += `\n${inner}Returns:\n${inner}"""\n`;
+    return s;
+  },
+
+  insertPosition(_doc, line) {
+    return new vscode.Position(line + 1, 0);
+  },
+
+  description(doc, line) {
+    const out: string[] = [];
+    for (let i = line + 1; i < doc.lineCount; i++) {
+      let t = doc.lineAt(i).text.trim();
+      if (i === line + 1) {
+        t = t.replace(/^[rRuU]?("""|''')/, '');
+      }
+      const closes = /("""|''')$/.test(t);
+      t = t.replace(/("""|''')$/, '').trim();
+      if (/^(Args|Arguments|Parameters|Returns|Raises):?$/.test(t)) {
+        break;
+      }
+      if (!t) {
+        if (out.length || closes) {
+          break;
+        }
+        continue;
+      }
+      if (!t.startsWith(PLACEHOLDER)) {
+        out.push(t);
+      }
+      if (closes) {
+        break;
+      }
+    }
+    return out.join(' ');
+  },
+};
+
+// ---------- Shared logic ----------
+
+const SUPPORTS: LangSupport[] = [jsSupport, dartSupport, pySupport];
+const LANGUAGE_IDS = SUPPORTS.flatMap(s => s.ids);
+
+function getSupport(doc: vscode.TextDocument): LangSupport | undefined {
+  return SUPPORTS.find(s => s.ids.includes(doc.languageId));
 }
 
 function updateDiagnostics(
   doc: vscode.TextDocument,
   collection: vscode.DiagnosticCollection
 ) {
-  if (!LANGUAGES.includes(doc.languageId)) {
+  const support = getSupport(doc);
+  if (!support) {
     return;
   }
   const diagnostics: vscode.Diagnostic[] = [];
   for (let i = 0; i < doc.lineCount; i++) {
     const line = doc.lineAt(i);
-    if (parseFunction(line.text) && !hasComment(doc, i)) {
+    if (support.parse(line.text) && !support.hasComment(doc, i)) {
       const d = new vscode.Diagnostic(
         line.range,
         'Function has no doc comment',
@@ -70,6 +257,10 @@ class DocFixProvider implements vscode.CodeActionProvider {
     _range: vscode.Range,
     context: vscode.CodeActionContext
   ): vscode.CodeAction[] {
+    const support = getSupport(doc);
+    if (!support) {
+      return [];
+    }
     const actions: vscode.CodeAction[] = [];
     for (const d of context.diagnostics) {
       if (d.source !== 'auto-doc') {
@@ -77,7 +268,7 @@ class DocFixProvider implements vscode.CodeActionProvider {
       }
       const lineNo = d.range.start.line;
       const text = doc.lineAt(lineNo).text;
-      const fn = parseFunction(text);
+      const fn = support.parse(text);
       if (!fn) {
         continue;
       }
@@ -91,31 +282,13 @@ class DocFixProvider implements vscode.CodeActionProvider {
       action.edit = new vscode.WorkspaceEdit();
       action.edit.insert(
         doc.uri,
-        new vscode.Position(lineNo, 0),
-        buildComment(indent, fn)
+        support.insertPosition(doc, lineNo),
+        support.build(indent, fn)
       );
       actions.push(action);
     }
     return actions;
   }
-}
-
-function getDescription(doc: vscode.TextDocument, fnLine: number): string {
-  if (!hasComment(doc, fnLine)) {
-    return '';
-  }
-  const lines: string[] = [];
-  for (let i = fnLine - 1; i >= 0; i--) {
-    const t = doc.lineAt(i).text.trim();
-    if (t.startsWith('/**')) {
-      break;
-    }
-    const clean = t.replace(/^\*+\/?\s?/, '').trim();
-    if (clean && !clean.startsWith('@') && !clean.startsWith('Description of ')) {
-      lines.unshift(clean);
-    }
-  }
-  return lines.join(' ');
 }
 
 async function generateDocs() {
@@ -124,17 +297,25 @@ async function generateDocs() {
     return;
   }
   const doc = editor.document;
+  const support = getSupport(doc);
+  if (!support) {
+    vscode.window.showWarningMessage(
+      'This language is not supported yet (JavaScript, TypeScript, Dart, Python).'
+    );
+    return;
+  }
+
   const fileName = doc.uri.path.split('/').pop();
   let md = `# ${fileName}\n\n`;
   let count = 0;
 
   for (let i = 0; i < doc.lineCount; i++) {
-    const fn = parseFunction(doc.lineAt(i).text);
+    const fn = support.parse(doc.lineAt(i).text);
     if (!fn) {
       continue;
     }
     count++;
-    const description = getDescription(doc, i) || '_No description yet._';
+    const description = support.description(doc, i) || '_No description yet._';
     md += `## ${fn.name}(${fn.params.join(', ')})\n\n${description}\n\n`;
     if (fn.params.length) {
       md += '**Parameters**\n\n';
@@ -151,7 +332,7 @@ async function generateDocs() {
     vscode.workspace.getWorkspaceFolder(doc.uri) ??
     vscode.workspace.workspaceFolders?.[0];
 
-  // No folder open: show a temporary page like before
+  // No folder open: show a temporary page
   if (!folder) {
     const out = await vscode.workspace.openTextDocument({
       content: md,
@@ -171,29 +352,39 @@ async function generateDocs() {
 export function activate(context: vscode.ExtensionContext) {
   const collection = vscode.languages.createDiagnosticCollection('auto-doc');
 
-  const cmd = vscode.commands.registerCommand('autoDoc.addComment', () => {
+  const addComment = vscode.commands.registerCommand('autoDoc.addComment', () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       return;
     }
+    const doc = editor.document;
+    const support = getSupport(doc);
+    if (!support) {
+      vscode.window.showWarningMessage('This language is not supported yet.');
+      return;
+    }
     const lineNo = editor.selection.active.line;
-    const text = editor.document.lineAt(lineNo).text;
-    const fn = parseFunction(text);
+    const text = doc.lineAt(lineNo).text;
+    const fn = support.parse(text);
     if (!fn) {
       vscode.window.showWarningMessage('Put your cursor on a function line.');
       return;
     }
+    if (support.hasComment(doc, lineNo)) {
+      vscode.window.showInformationMessage('This function already has a comment.');
+      return;
+    }
     const indent = text.match(/^\s*/)![0];
     editor.edit(edit =>
-      edit.insert(new vscode.Position(lineNo, 0), buildComment(indent, fn))
+      edit.insert(support.insertPosition(doc, lineNo), support.build(indent, fn))
     );
   });
 
   context.subscriptions.push(
     collection,
-    cmd,
+    addComment,
     vscode.commands.registerCommand('autoDoc.generateDocs', generateDocs),
-    vscode.languages.registerCodeActionsProvider(LANGUAGES, new DocFixProvider(), {
+    vscode.languages.registerCodeActionsProvider(LANGUAGE_IDS, new DocFixProvider(), {
       providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
     }),
     vscode.workspace.onDidOpenTextDocument(d => updateDiagnostics(d, collection)),

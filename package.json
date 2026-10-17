@@ -1,7 +1,7 @@
 {
   "name": "auto-doc",
   "displayName": "auto-doc",
-  "description": "",
+  "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Dart and Python.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.140.0"
@@ -9,20 +9,25 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["onLanguage:javascript", "onLanguage:typescript"],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:dart",
+    "onLanguage:python"
+  ],
   "main": "./out/extension.js",
-"contributes": {
-  "commands": [
-    {
-      "command": "autoDoc.addComment",
-      "title": "Add Doc Comment"
-    },
-    {
-      "command": "autoDoc.generateDocs",
-      "title": "Generate Documentation"
-    }
-  ]
-},
+  "contributes": {
+    "commands": [
+      {
+        "command": "autoDoc.addComment",
+        "title": "Add Doc Comment"
+      },
+      {
+        "command": "autoDoc.generateDocs",
+        "title": "Generate Documentation"
+      }
+    ]
+  },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
