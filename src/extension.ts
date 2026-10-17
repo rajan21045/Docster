@@ -147,11 +147,25 @@ async function generateDocs() {
     return;
   }
 
-  const out = await vscode.workspace.openTextDocument({
-    content: md,
-    language: 'markdown',
-  });
-  await vscode.window.showTextDocument(out, vscode.ViewColumn.Beside);
+  const folder =
+    vscode.workspace.getWorkspaceFolder(doc.uri) ??
+    vscode.workspace.workspaceFolders?.[0];
+
+  // No folder open: show a temporary page like before
+  if (!folder) {
+    const out = await vscode.workspace.openTextDocument({
+      content: md,
+      language: 'markdown',
+    });
+    await vscode.window.showTextDocument(out, vscode.ViewColumn.Beside);
+    return;
+  }
+
+  // Folder open: save the result as DOCS.md
+  const target = vscode.Uri.joinPath(folder.uri, 'DOCS.md');
+  await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(md));
+  const saved = await vscode.workspace.openTextDocument(target);
+  await vscode.window.showTextDocument(saved, vscode.ViewColumn.Beside);
 }
 
 export function activate(context: vscode.ExtensionContext) {
