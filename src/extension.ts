@@ -17,6 +17,13 @@ interface LangSupport {
 const PLACEHOLDER = 'Description of ';
 
 // Moves up past lines like @override or @staticmethod
+/**
+ * Description of firstLineAboveDecorators
+ *
+ * @param doc
+ * @param line
+ * @returns
+ */
 function firstLineAboveDecorators(doc: vscode.TextDocument, line: number): number {
 	let l = line;
 	while (l > 0 && doc.lineAt(l - 1).text.trim().startsWith('@')) {
@@ -93,6 +100,12 @@ const DART_PATTERN =
 	/^\s*(?:static\s+)?[\w<>?,.[\]]+\s+(\w+)\s*\(([^)]*)\)\s*(?:async\*?\s*|sync\*\s*)?(?:\{|=>)/;
 const DART_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return'];
 
+/**
+ * Description of parseDartParams
+ *
+ * @param raw
+ * @returns
+ */
 function parseDartParams(raw: string): string[] {
 	return raw
 		.replace(/[{}[\]]/g, '')
@@ -223,6 +236,12 @@ const pySupport: LangSupport = {
 const SUPPORTS: LangSupport[] = [jsSupport, dartSupport, pySupport];
 const LANGUAGE_IDS = SUPPORTS.flatMap(s => s.ids);
 
+/**
+ * Description of getSupport
+ *
+ * @param doc
+ * @returns
+ */
 function getSupport(doc: vscode.TextDocument): LangSupport | undefined {
 	return SUPPORTS.find(s => s.ids.includes(doc.languageId));
 }
@@ -320,6 +339,13 @@ function buildFileDocs(
 }
 
 // Saves DOCS.md in the folder, or shows a temporary page if no folder is open
+/**
+ * Description of outputDocs
+ *
+ * @param md
+ * @param folder
+ * @returns
+ */
 async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined) {
 	if (!folder) {
 		const out = await vscode.workspace.openTextDocument({
@@ -335,6 +361,11 @@ async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined
 	await vscode.window.showTextDocument(saved, vscode.ViewColumn.Beside);
 }
 
+/**
+ * Description of generateDocs
+ *
+ * @returns
+ */
 async function generateDocs() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
@@ -363,6 +394,11 @@ async function generateDocs() {
 	await outputDocs(md, folder);
 }
 
+/**
+ * Description of generateProjectDocs
+ *
+ * @returns
+ */
 async function generateProjectDocs() {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (!folder) {
@@ -419,6 +455,12 @@ async function generateProjectDocs() {
 	await outputDocs(header + body, folder);
 }
 
+/**
+ * Description of activate
+ *
+ * @param context
+ * @returns
+ */
 export function activate(context: vscode.ExtensionContext) {
 	const collection = vscode.languages.createDiagnosticCollection('auto-doc');
 
@@ -468,4 +510,9 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.workspace.textDocuments.forEach(d => updateDiagnostics(d, collection));
 }
 
+/**
+ * Description of deactivate
+ *
+ * @returns
+ */
 export function deactivate() { }
