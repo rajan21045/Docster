@@ -1,12 +1,27 @@
 {
   "name": "auto-doc",
-  "displayName": "auto-doc",
+  "displayName": "Auto Doc",
   "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Dart and Python.",
   "version": "0.0.1",
+  "publisher": "rajan21045",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajan21045/auto-doc.git"
+  },
+  "keywords": [
+    "documentation",
+    "comments",
+    "docstring",
+    "jsdoc",
+    "dart",
+    "python"
+  ],
   "engines": {
     "vscode": "^1.140.0"
   },
   "categories": [
+    "Linters",
     "Other"
   ],
   "activationEvents": [
