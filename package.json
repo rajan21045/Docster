@@ -4,7 +4,7 @@
   "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Dart and Python.",
   "icon": "icon.png",
   "version": "0.0.1",
-  "publisher": "rajan21045",
+  "publisher": "RajanPoudel",
   "license": "MIT",
   "repository": {
     "type": "git",
