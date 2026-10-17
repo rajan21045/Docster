@@ -16,20 +16,128 @@ interface LangSupport {
 
 const PLACEHOLDER = 'Description of ';
 
-// Moves up past lines like @override or @staticmethod
-/**
- * Description of firstLineAboveDecorators
- *
- * @param doc
- * @param line
- * @returns
- */
-function firstLineAboveDecorators(doc: vscode.TextDocument, line: number): number {
+// ---------- Helpers ----------
+
+// Moves up past lines like @Override, @staticmethod or [Attribute]
+function firstLineAboveDecorators(
+	doc: vscode.TextDocument,
+	line: number,
+	markers: string[] = ['@']
+): number {
 	let l = line;
-	while (l > 0 && doc.lineAt(l - 1).text.trim().startsWith('@')) {
+	while (l > 0) {
+		const t = doc.lineAt(l - 1).text.trim();
+		if (!markers.some(m => t.startsWith(m))) {
+			break;
+		}
 		l--;
 	}
 	return l;
+}
+
+// Splits "a, Map<K, V> b, c" on top-level commas only
+function splitParams(raw: string): string[] {
+	const out: string[] = [];
+	let depth = 0;
+	let cur = '';
+	for (const ch of raw) {
+		if ('<([{'.includes(ch)) {
+			depth++;
+		} else if ('>)]}'.includes(ch)) {
+			depth = Math.max(0, depth - 1);
+		}
+		if (ch === ',' && depth === 0) {
+			out.push(cur);
+			cur = '';
+		} else {
+			cur += ch;
+		}
+	}
+	out.push(cur);
+	return out.map(s => s.trim()).filter(Boolean);
+}
+
+// Last word of "const char *name = x" -> "name"
+function lastWord(p: string): string {
+	const cleaned = p.split('=')[0].replace(/\[.*?\]/g, '').trim();
+	return cleaned.match(/(\w+)\s*$/)?.[1] ?? '';
+}
+
+function parseWith(
+	text: string,
+	pattern: RegExp,
+	skip: string[],
+	toParams: (raw: string) => string[]
+): ParsedFunction | undefined {
+	const m = text.match(pattern);
+	if (!m || skip.includes(m[1])) {
+		return undefined;
+	}
+	return { name: m[1], params: toParams(m[2]) };
+}
+
+// Used by JavaScript, Java, C and PHP: comments written as /** ... */
+function makeBlockSupport(opts: {
+	ids: string[];
+	parse: (text: string) => ParsedFunction | undefined;
+	returnTag: string;
+	paramType?: string;
+	markers?: string[];
+}): LangSupport {
+	const markers = opts.markers ?? [];
+
+	const hasComment = (doc: vscode.TextDocument, line: number): boolean => {
+		const l = firstLineAboveDecorators(doc, line, markers);
+		return l > 0 && doc.lineAt(l - 1).text.trim().endsWith('*/');
+	};
+
+	return {
+		ids: opts.ids,
+		parse: opts.parse,
+		hasComment,
+
+		build(indent, fn) {
+			const type = opts.paramType ? opts.paramType + ' ' : '';
+			return (
+				`${indent}/**\n` +
+				`${indent} * ${PLACEHOLDER}${fn.name}\n` +
+				`${indent} *\n` +
+				fn.params.map(p => `${indent} * @param ${type}${p}\n`).join('') +
+				`${indent} * ${opts.returnTag}\n` +
+				`${indent} */\n`
+			);
+		},
+
+		insertPosition(doc, line) {
+			return new vscode.Position(firstLineAboveDecorators(doc, line, markers), 0);
+		},
+
+		description(doc, line) {
+			if (!hasComment(doc, line)) {
+				return '';
+			}
+			const lines: string[] = [];
+			for (let i = firstLineAboveDecorators(doc, line, markers) - 1; i >= 0; i--) {
+				const t = doc.lineAt(i).text.trim();
+				if (t.startsWith('/**')) {
+					// also handles one-line comments like /** Adds numbers */
+					const inline = t.replace(/^\/\*+\s?/, '').replace(/\*+\/$/, '').trim();
+					if (inline && !inline.startsWith('@') && !inline.startsWith(PLACEHOLDER)) {
+						lines.unshift(inline);
+					}
+					break;
+				}
+				if (t.startsWith('/*')) {
+					break;
+				}
+				const clean = t.replace(/^\*+\/?\s?/, '').trim();
+				if (clean && !clean.startsWith('@') && !clean.startsWith(PLACEHOLDER)) {
+					lines.unshift(clean);
+				}
+			}
+			return lines.join(' ');
+		},
+	};
 }
 
 // ---------- JavaScript / TypeScript ----------
@@ -39,10 +147,9 @@ const JS_PATTERNS = [
 	/(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/,
 ];
 
-const jsSupport: LangSupport = {
+const jsSupport = makeBlockSupport({
 	ids: ['javascript', 'typescript', 'javascriptreact', 'typescriptreact'],
-
-	parse(text) {
+	parse: text => {
 		for (const pattern of JS_PATTERNS) {
 			const m = text.match(pattern);
 			if (m) {
@@ -55,20 +162,136 @@ const jsSupport: LangSupport = {
 		}
 		return undefined;
 	},
+	returnTag: '@returns',
+	markers: ['@'],
+});
+
+// ---------- Java ----------
+
+const JAVA_PATTERN =
+	/^\s*(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)*(?:<[^()]*>\s+)?[\w.]+(?:<[^()]*>)?(?:\[\])*\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w.,\s]+)?\{?\s*$/;
+const JAVA_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return', 'new', 'synchronized', 'throw'];
+
+const javaSupport = makeBlockSupport({
+	ids: ['java'],
+	parse: text =>
+		parseWith(text, JAVA_PATTERN, JAVA_SKIP, raw => splitParams(raw).map(lastWord).filter(Boolean)),
+	returnTag: '@return',
+	markers: ['@'],
+});
+
+// ---------- C / C++ ----------
+
+const C_PATTERN =
+	/^\s*(?:(?:static|inline|extern|const|unsigned|signed|struct|enum|virtual|constexpr)\s+)*[\w:<>*&]+[\s*&]+(?:\w+::)*(\w+)\s*\(([^)]*)\)\s*(?:const\s*)?(?:noexcept\s*)?\{?\s*$/;
+const C_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return', 'sizeof', 'defined'];
+
+function parseCParams(raw: string): string[] {
+	if (raw.trim() === '' || raw.trim() === 'void') {
+		return [];
+	}
+	return splitParams(raw).map(lastWord).filter(p => p && p !== 'void');
+}
+
+const cSupport = makeBlockSupport({
+	ids: ['c', 'cpp'],
+	parse: text => parseWith(text, C_PATTERN, C_SKIP, parseCParams),
+	returnTag: '@return',
+});
+
+// ---------- PHP ----------
+
+const PHP_PATTERN =
+	/^\s*(?:(?:public|private|protected|static|final|abstract)\s+)*function\s+&?(\w+)\s*\(([^)]*)\)/;
+
+const phpSupport = makeBlockSupport({
+	ids: ['php'],
+	parse: text =>
+		parseWith(text, PHP_PATTERN, [], raw =>
+			splitParams(raw)
+				.map(p => p.match(/\$\w+/)?.[0] ?? '')
+				.filter(Boolean)
+		),
+	returnTag: '@return',
+	paramType: 'mixed',
+	markers: ['#['],
+});
+
+// ---------- C# (XML comments) ----------
+
+const CS_PATTERN =
+	/^\s*(?:\[[^\]]*\]\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|async|sealed|extern|unsafe|partial|new|readonly)\s+)*[\w.]+(?:<[^()]*>)?(?:\[\])*\??\s+(\w+)\s*(?:<[^()]*>)?\s*\(([^)]*)\)\s*(?:where\s[^{=]*)?(?:\{|=>.*)?\s*$/;
+const CS_SKIP = [
+	'if', 'for', 'foreach', 'while', 'switch', 'catch', 'else', 'return',
+	'new', 'using', 'lock', 'await', 'throw', 'nameof', 'typeof',
+];
+const CS_MARKERS = ['['];
+
+const csSupport: LangSupport = {
+	ids: ['csharp'],
+
+	parse(text) {
+		return parseWith(text, CS_PATTERN, CS_SKIP, raw => splitParams(raw).map(lastWord).filter(Boolean));
+	},
 
 	hasComment(doc, line) {
-		return line > 0 && doc.lineAt(line - 1).text.trim().endsWith('*/');
+		const l = firstLineAboveDecorators(doc, line, CS_MARKERS);
+		return l > 0 && doc.lineAt(l - 1).text.trim().startsWith('///');
 	},
 
 	build(indent, fn) {
 		return (
-			`${indent}/**\n` +
-			`${indent} * ${PLACEHOLDER}${fn.name}\n` +
-			`${indent} *\n` +
-			fn.params.map(p => `${indent} * @param ${p}\n`).join('') +
-			`${indent} * @returns\n` +
-			`${indent} */\n`
+			`${indent}/// <summary>\n` +
+			`${indent}/// ${PLACEHOLDER}${fn.name}\n` +
+			`${indent}/// </summary>\n` +
+			fn.params.map(p => `${indent}/// <param name="${p}"></param>\n`).join('') +
+			`${indent}/// <returns></returns>\n`
 		);
+	},
+
+	insertPosition(doc, line) {
+		return new vscode.Position(firstLineAboveDecorators(doc, line, CS_MARKERS), 0);
+	},
+
+	description(doc, line) {
+		const lines: string[] = [];
+		let i = firstLineAboveDecorators(doc, line, CS_MARKERS) - 1;
+		while (i >= 0 && doc.lineAt(i).text.trim().startsWith('///')) {
+			const raw = doc.lineAt(i).text.trim().replace(/^\/\/\/\s?/, '').trim();
+			if (!/^<(param|returns|typeparam|exception)/.test(raw)) {
+				const clean = raw.replace(/<[^>]+>/g, '').trim();
+				if (clean && !clean.startsWith(PLACEHOLDER)) {
+					lines.unshift(clean);
+				}
+			}
+			i--;
+		}
+		return lines.join(' ');
+	},
+};
+
+// ---------- Go ----------
+
+const GO_PATTERN = /^func\s+(?:\([^)]*\)\s*)?(\w+)\s*(?:\[[^\]]*\])?\s*\(([^)]*)\)/;
+
+const goSupport: LangSupport = {
+	ids: ['go'],
+
+	parse(text) {
+		return parseWith(text, GO_PATTERN, [], raw =>
+			splitParams(raw)
+				.map(p => p.split(/\s+/)[0].replace(/[^\w]/g, ''))
+				.filter(Boolean)
+		);
+	},
+
+	hasComment(doc, line) {
+		return line > 0 && doc.lineAt(line - 1).text.trim().startsWith('//');
+	},
+
+	// Go style: the comment starts with the function name
+	build(indent, fn) {
+		return `${indent}// ${fn.name} TODO: describe what ${fn.name} does.\n`;
 	},
 
 	insertPosition(_doc, line) {
@@ -76,36 +299,25 @@ const jsSupport: LangSupport = {
 	},
 
 	description(doc, line) {
-		if (!this.hasComment(doc, line)) {
-			return '';
-		}
 		const lines: string[] = [];
-		for (let i = line - 1; i >= 0; i--) {
-			const t = doc.lineAt(i).text.trim();
-			if (t.startsWith('/**')) {
-				break;
-			}
-			const clean = t.replace(/^\*+\/?\s?/, '').trim();
-			if (clean && !clean.startsWith('@') && !clean.startsWith(PLACEHOLDER)) {
+		let i = line - 1;
+		while (i >= 0 && doc.lineAt(i).text.trim().startsWith('//')) {
+			const clean = doc.lineAt(i).text.trim().replace(/^\/\/+\s?/, '').trim();
+			if (clean && !clean.includes('TODO: describe')) {
 				lines.unshift(clean);
 			}
+			i--;
 		}
 		return lines.join(' ');
 	},
 };
 
-// ---------- Dart ----------
+// ---------- Dart (Flutter) ----------
 
 const DART_PATTERN =
 	/^\s*(?:static\s+)?[\w<>?,.[\]]+\s+(\w+)\s*\(([^)]*)\)\s*(?:async\*?\s*|sync\*\s*)?(?:\{|=>)/;
 const DART_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return'];
 
-/**
- * Description of parseDartParams
- *
- * @param raw
- * @returns
- */
 function parseDartParams(raw: string): string[] {
 	return raw
 		.replace(/[{}[\]]/g, '')
@@ -120,11 +332,7 @@ const dartSupport: LangSupport = {
 	ids: ['dart'],
 
 	parse(text) {
-		const m = text.match(DART_PATTERN);
-		if (!m || DART_SKIP.includes(m[1])) {
-			return undefined;
-		}
-		return { name: m[1], params: parseDartParams(m[2]) };
+		return parseWith(text, DART_PATTERN, DART_SKIP, parseDartParams);
 	},
 
 	hasComment(doc, line) {
@@ -233,15 +441,18 @@ const pySupport: LangSupport = {
 
 // ---------- Shared logic ----------
 
-const SUPPORTS: LangSupport[] = [jsSupport, dartSupport, pySupport];
+const SUPPORTS: LangSupport[] = [
+	jsSupport,
+	dartSupport,
+	pySupport,
+	javaSupport,
+	cSupport,
+	csSupport,
+	goSupport,
+	phpSupport,
+];
 const LANGUAGE_IDS = SUPPORTS.flatMap(s => s.ids);
 
-/**
- * Description of getSupport
- *
- * @param doc
- * @returns
- */
 function getSupport(doc: vscode.TextDocument): LangSupport | undefined {
 	return SUPPORTS.find(s => s.ids.includes(doc.languageId));
 }
@@ -339,13 +550,6 @@ function buildFileDocs(
 }
 
 // Saves DOCS.md in the folder, or shows a temporary page if no folder is open
-/**
- * Description of outputDocs
- *
- * @param md
- * @param folder
- * @returns
- */
 async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined) {
 	if (!folder) {
 		const out = await vscode.workspace.openTextDocument({
@@ -361,11 +565,6 @@ async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined
 	await vscode.window.showTextDocument(saved, vscode.ViewColumn.Beside);
 }
 
-/**
- * Description of generateDocs
- *
- * @returns
- */
 async function generateDocs() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
@@ -375,7 +574,7 @@ async function generateDocs() {
 	const support = getSupport(doc);
 	if (!support) {
 		vscode.window.showWarningMessage(
-			'This language is not supported yet (JavaScript, TypeScript, Dart, Python).'
+			`This language is not supported yet. Supported: ${LANGUAGE_IDS.join(', ')}`
 		);
 		return;
 	}
@@ -394,11 +593,6 @@ async function generateDocs() {
 	await outputDocs(md, folder);
 }
 
-/**
- * Description of generateProjectDocs
- *
- * @returns
- */
 async function generateProjectDocs() {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (!folder) {
@@ -407,8 +601,8 @@ async function generateProjectDocs() {
 	}
 
 	const files = await vscode.workspace.findFiles(
-		'**/*.{js,jsx,ts,tsx,dart,py}',
-		'**/{node_modules,out,dist,build,.git,.dart_tool,venv,.venv,__pycache__}/**',
+		'**/*.{js,jsx,ts,tsx,dart,py,java,c,h,cpp,cc,hpp,cs,go,php}',
+		'**/{node_modules,out,dist,build,.git,.dart_tool,venv,.venv,__pycache__,vendor,bin,obj,target}/**',
 		500
 	);
 	files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
@@ -455,12 +649,6 @@ async function generateProjectDocs() {
 	await outputDocs(header + body, folder);
 }
 
-/**
- * Description of activate
- *
- * @param context
- * @returns
- */
 export function activate(context: vscode.ExtensionContext) {
 	const collection = vscode.languages.createDiagnosticCollection('auto-doc');
 
@@ -510,9 +698,4 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.workspace.textDocuments.forEach(d => updateDiagnostics(d, collection));
 }
 
-/**
- * Description of deactivate
- *
- * @returns
- */
 export function deactivate() { }

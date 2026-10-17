@@ -1,9 +1,9 @@
 {
-  "name": "Docster",
+  "name": "docster",
   "displayName": "Docster",
-  "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Dart and Python.",
+  "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Python, Dart, Java, C, C++, C#, Go and PHP.",
   "icon": "icon.png",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "RajanPoudel",
   "license": "MIT",
   "repository": {
@@ -15,8 +15,14 @@
     "comments",
     "docstring",
     "jsdoc",
+    "javadoc",
     "dart",
-    "python"
+    "flutter",
+    "python",
+    "java",
+    "csharp",
+    "go",
+    "php"
   ],
   "engines": {
     "vscode": "^1.140.0"
@@ -29,7 +35,13 @@
     "onLanguage:javascript",
     "onLanguage:typescript",
     "onLanguage:dart",
-    "onLanguage:python"
+    "onLanguage:python",
+    "onLanguage:java",
+    "onLanguage:c",
+    "onLanguage:cpp",
+    "onLanguage:csharp",
+    "onLanguage:go",
+    "onLanguage:php"
   ],
   "main": "./out/extension.js",
   "contributes": {
