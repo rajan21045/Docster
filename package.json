@@ -3,9 +3,13 @@
   "displayName": "Docster",
   "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Python, Dart, Java, C, C++, C#, Go and PHP.",
   "icon": "icon.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "RajanPoudel",
   "license": "MIT",
+  "homepage": "https://github.com/rajan21045/Docster#readme",
+  "bugs": {
+    "url": "https://github.com/rajan21045/Docster/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/rajan21045/Docster.git"
@@ -25,7 +29,7 @@
     "php"
   ],
   "engines": {
-    "vscode": "^1.140.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "Linters",
@@ -34,6 +38,8 @@
   "activationEvents": [
     "onLanguage:javascript",
     "onLanguage:typescript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescriptreact",
     "onLanguage:dart",
     "onLanguage:python",
     "onLanguage:java",
@@ -47,18 +53,49 @@
   "contributes": {
     "commands": [
       {
-        "command": "autoDoc.addComment",
-        "title": "Add Doc Comment"
+        "command": "docster.addComment",
+        "title": "Add Doc Comment",
+        "category": "Docster"
       },
       {
-        "command": "autoDoc.generateDocs",
-        "title": "Generate Documentation"
+        "command": "docster.generateDocs",
+        "title": "Generate Documentation",
+        "category": "Docster"
       },
       {
-        "command": "autoDoc.generateProjectDocs",
-        "title": "Generate Project Documentation"
+        "command": "docster.generateProjectDocs",
+        "title": "Generate Project Documentation",
+        "category": "Docster"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "docster.addComment",
+          "when": "editorLangId =~ /^(javascript|typescript|javascriptreact|typescriptreact|dart|python|java|c|cpp|csharp|go|php)$/",
+          "group": "1_modification@99"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Docster",
+      "properties": {
+        "docster.pythonDocstringStyle": {
+          "type": "string",
+          "enum": [
+            "google",
+            "numpy"
+          ],
+          "default": "google",
+          "description": "Docstring style used when generating Python documentation."
+        },
+        "docster.warnMissingComments": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a warning on functions that have no doc comment."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -66,17 +103,19 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.140.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "typescript-eslint": "^8.61.1",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
     "eslint": "^10.5.0",
     "typescript": "^6.0.3",
-    "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0"
+    "typescript-eslint": "^8.61.1"
   },
   "overrides": {
     "diff": "^8.0.4",

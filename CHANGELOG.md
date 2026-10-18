@@ -1,9 +1,8 @@
-# Change Log
+## [0.1.1]
 
-All notable changes to the "auto-doc" extension will be documented in this file.
-
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
-## [Unreleased]
-
-- Initial release
+- Commands renamed from `autoDoc.*` to `docster.*`.
+- New settings: Python docstring style (Google or NumPy) and warnings on/off.
+- Fixed Python and Dart parameters with commas in type hints.
+- Commented-out functions in JavaScript and TypeScript no longer get warnings.
+- Generate Documentation now opens a preview and no longer overwrites DOCS.md.
+- Removed the default keyboard shortcut, which clashed with the Dart/Flutter extension.

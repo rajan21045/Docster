@@ -1,67 +1,82 @@
 # Docster
 
-Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Dart, Python, Java, C, C#, Go, PHP, Flutter, and ADO.NET — no AI or API key required.
+Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Dart, Python, Java, C, C++, C#, Go and PHP. No AI and no API key required.
 
-[![VS Code Marketplace](https://img.shields.io/vscode-marketplace/v/rajanpoudel.docster?style=for-the-badge&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=RajanPoudel.docster)
-[![Installs](https://img.shields.io/vscode-marketplace/i/rajanpoudel.docster?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=RajanPoudel.docster)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE.txt)
+[![VS Code Marketplace](https://img.shields.io/vscode-marketplace/v/RajanPoudel.docster?style=for-the-badge&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=RajanPoudel.docster)
+[![Installs](https://img.shields.io/vscode-marketplace/i/RajanPoudel.docster?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=RajanPoudel.docster)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 ---
 
-## Supported Tech Stack & Comment Styles
+<!-- Add screenshots or a short GIF here, for example:
+![Quick fix](images/quickfix.png)
+-->
 
-![C](https://img.shields.io/badge/C-00599C?style=flat-square&logo=c&logoColor=white)
-![C#](https://img.shields.io/badge/C%23-239120?style=flat-square&logo=c-sharp&logoColor=white)
-![Java](https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![Dart](https://img.shields.io/badge/Dart-0175C2?style=flat-square&logo=dart&logoColor=white)
-![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white)
-![PHP](https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
-![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white)
-![.NET](https://img.shields.io/badge/ADO.NET-512BD4?style=flat-square&logo=.net&logoColor=white)
+## Supported Languages and Comment Styles
 
-| Language / Framework | Comment Style | Output Syntax |
+| Language | Comment Style | Output |
 | :--- | :--- | :--- |
-| **C / C++** | `/** ... */` or `///` | Doxygen |
-| **C# (.NET / ADO.NET)** | `/// <summary>...</summary>` | XML Documentation |
-| **Java** | `/** ... */` | Javadoc |
-| **Python** | `""" docstring """` | Google / NumPy Docstring |
+| **JavaScript / TypeScript** (including JSX and TSX) | `/** ... */` | JSDoc |
+| **Python** | `""" docstring """` | Google or NumPy docstring |
 | **Dart / Flutter** | `///` | Dartdoc |
-| **Go** | `// Package/Function doc` | Godoc |
+| **Java** | `/** ... */` | Javadoc |
+| **C / C++** | `/** ... */` | Doxygen-style block |
+| **C#** | `/// <summary>...</summary>` | XML documentation |
+| **Go** | `// Name ...` | Godoc |
 | **PHP** | `/** ... */` | PHPDoc |
-| **JavaScript / TypeScript** | `/** ... */` | JSDoc |
-
----
-
-## Quick Start
-
-1. Install **Docster** from the VS Code Marketplace.
-2. Open any code file (`.c`, `.cs`, `.java`, `.py`, `.dart`, `.go`, `.php`, `.js`, `.ts`).
-3. Place your cursor on a function/method line.
-4. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac) and select **Add Doc Comment**.
 
 ---
 
 ## Features
 
-* **Add Doc Comment:** Inserts language-standard doc comments directly above the active function.
-* **Inline Warnings:** Flags functions missing comments with subtle warnings.
-* **Generate Documentation:** Creates a `DOCS.md` file for your active file.
-* **Generate Project Documentation:** Scans your entire project folder and outputs a unified `DOCS.md`.
+* **Add Doc Comment:** inserts a language-standard comment for the function under your cursor, with the parameters already listed.
+* **Missing comment warnings:** functions without a doc comment get a warning underline.
+* **Quick fix:** click the lightbulb (or press `Ctrl+.`) on a warning and choose **Add doc comment**.
+* **Generate Documentation:** builds Markdown documentation for the current file and opens it as a preview.
+* **Generate Project Documentation:** scans your workspace and saves one `DOCS.md` in the project folder.
 
 ---
 
 ## How to Use
 
-| Command | Action |
+1. Open a code file in one of the supported languages.
+2. Put your cursor on a function line.
+3. Right-click and choose **Add Doc Comment**, or press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac) and run **Docster: Add Doc Comment**.
+
+| Command | What it does |
 | :--- | :--- |
-| `Add Doc Comment` | Insert doc block for current cursor function |
-| `Generate Documentation` | Build `DOCS.md` for current open file |
-| `Generate Project Documentation` | Build `DOCS.md` for whole workspace |
+| `Docster: Add Doc Comment` | Adds a doc comment for the function under the cursor |
+| `Docster: Generate Documentation` | Shows Markdown docs for the current file |
+| `Docster: Generate Project Documentation` | Saves `DOCS.md` for the whole workspace |
+
+There is no default keyboard shortcut, to avoid clashing with other extensions. You can add your own in **Keyboard Shortcuts** by searching for "Docster".
+
+---
+
+## Settings
+
+| Setting | Default | Description |
+| :--- | :--- | :--- |
+| `docster.pythonDocstringStyle` | `google` | Docstring style for Python: `google` or `numpy` |
+| `docster.warnMissingComments` | `true` | Show a warning on functions with no doc comment |
+
+---
+
+## Known Limitations
+
+* Docster reads code line by line, so a function signature must fit on one line.
+* In JavaScript and TypeScript, `function` declarations and `const name = (...) =>` arrow functions are detected. Class methods are not detected yet.
+* Destructured parameters in JavaScript are named `param1`, `param2` and so on. Rename them by hand.
+* Generated comments contain placeholder text (`Description of ...`) for you to fill in.
+
+---
+
+## Feedback
+
+Found a bug or have an idea? Please open an issue on [GitHub](https://github.com/rajan21045/Docster/issues).
 
 ---
 
 ## License
 
-Licensed under the [MIT License](LICENSE.txt).
+Licensed under the [MIT License](LICENSE).

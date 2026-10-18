@@ -150,13 +150,18 @@ const JS_PATTERNS = [
 const jsSupport = makeBlockSupport({
 	ids: ['javascript', 'typescript', 'javascriptreact', 'typescriptreact'],
 	parse: text => {
+		// Ignore commented-out code and comment text
+		const t = text.trim();
+		if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) {
+			return undefined;
+		}
 		for (const pattern of JS_PATTERNS) {
 			const m = text.match(pattern);
 			if (m) {
-				const params = m[2]
-					.split(',')
-					.map(p => p.trim().split(/[:=]/)[0].trim())
-					.filter(Boolean);
+				const params = splitParams(m[2])
+					.map(p => p.split(/[:=]/)[0].trim())
+					.filter(Boolean)
+					.map((p, i) => (p.startsWith('{') || p.startsWith('[') ? `param${i + 1}` : p));
 				return { name: m[1], params };
 			}
 		}
@@ -319,9 +324,7 @@ const DART_PATTERN =
 const DART_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return'];
 
 function parseDartParams(raw: string): string[] {
-	return raw
-		.replace(/[{}[\]]/g, '')
-		.split(',')
+	return splitParams(raw.replace(/[{}[\]]/g, ''))
 		.map(p => p.split('=')[0].trim())
 		.map(p => p.split(/\s+/).pop() ?? '')
 		.map(p => p.replace(/^this\./, ''))
@@ -379,8 +382,7 @@ const pySupport: LangSupport = {
 		if (!m) {
 			return undefined;
 		}
-		const params = m[2]
-			.split(',')
+		const params = splitParams(m[2])
 			.map(p => p.split(/[:=]/)[0].trim().replace(/^\*+/, ''))
 			.filter(p => p && p !== 'self' && p !== 'cls' && p !== '/');
 		return { name: m[1], params };
@@ -395,15 +397,25 @@ const pySupport: LangSupport = {
 		return /^[rRuU]?("""|''')/.test(next);
 	},
 
+	// Style comes from the "docster.pythonDocstringStyle" setting (google or numpy)
 	build(indent, fn) {
 		const inner = indent + '    ';
+		const style = vscode.workspace
+			.getConfiguration('docster')
+			.get<string>('pythonDocstringStyle', 'google');
 		let s = `${inner}"""${PLACEHOLDER}${fn.name}\n`;
+		if (style === 'numpy') {
+			if (fn.params.length) {
+				s += `\n${inner}Parameters\n${inner}----------\n`;
+				s += fn.params.map(p => `${inner}${p} :\n`).join('');
+			}
+			return s + `\n${inner}Returns\n${inner}-------\n${inner}"""\n`;
+		}
 		if (fn.params.length) {
 			s += `\n${inner}Args:\n`;
 			s += fn.params.map(p => `${inner}    ${p}:\n`).join('');
 		}
-		s += `\n${inner}Returns:\n${inner}"""\n`;
-		return s;
+		return s + `\n${inner}Returns:\n${inner}"""\n`;
 	},
 
 	insertPosition(_doc, line) {
@@ -465,6 +477,16 @@ function updateDiagnostics(
 	if (!support) {
 		return;
 	}
+
+	// Respect the "docster.warnMissingComments" setting
+	const enabled = vscode.workspace
+		.getConfiguration('docster')
+		.get<boolean>('warnMissingComments', true);
+	if (!enabled) {
+		collection.delete(doc.uri);
+		return;
+	}
+
 	const diagnostics: vscode.Diagnostic[] = [];
 	for (let i = 0; i < doc.lineCount; i++) {
 		const line = doc.lineAt(i);
@@ -474,7 +496,7 @@ function updateDiagnostics(
 				'Function has no doc comment',
 				vscode.DiagnosticSeverity.Warning
 			);
-			d.source = 'auto-doc';
+			d.source = 'docster';
 			diagnostics.push(d);
 		}
 	}
@@ -493,7 +515,7 @@ class DocFixProvider implements vscode.CodeActionProvider {
 		}
 		const actions: vscode.CodeAction[] = [];
 		for (const d of context.diagnostics) {
-			if (d.source !== 'auto-doc') {
+			if (d.source !== 'docster') {
 				continue;
 			}
 			const lineNo = d.range.start.line;
@@ -549,7 +571,7 @@ function buildFileDocs(
 	return { md, count };
 }
 
-// Saves DOCS.md in the folder, or shows a temporary page if no folder is open
+// Saves DOCS.md in the folder, or shows an unsaved page if no folder is given
 async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined) {
 	if (!folder) {
 		const out = await vscode.workspace.openTextDocument({
@@ -565,6 +587,7 @@ async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined
 	await vscode.window.showTextDocument(saved, vscode.ViewColumn.Beside);
 }
 
+// Single-file docs open as an unsaved preview, so they never overwrite DOCS.md
 async function generateDocs() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
@@ -587,12 +610,10 @@ async function generateDocs() {
 		return;
 	}
 
-	const folder =
-		vscode.workspace.getWorkspaceFolder(doc.uri) ??
-		vscode.workspace.workspaceFolders?.[0];
-	await outputDocs(md, folder);
+	await outputDocs(md, undefined);
 }
 
+// Project docs are saved to DOCS.md in the first workspace folder
 async function generateProjectDocs() {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (!folder) {
@@ -650,9 +671,10 @@ async function generateProjectDocs() {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const collection = vscode.languages.createDiagnosticCollection('auto-doc');
+	console.log('Docster activated');
+	const collection = vscode.languages.createDiagnosticCollection('docster');
 
-	const addComment = vscode.commands.registerCommand('autoDoc.addComment', () => {
+	const addComment = vscode.commands.registerCommand('docster.addComment', () => {
 		const editor = vscode.window.activeTextEditor;
 		if (!editor) {
 			return;
@@ -683,8 +705,8 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		collection,
 		addComment,
-		vscode.commands.registerCommand('autoDoc.generateDocs', generateDocs),
-		vscode.commands.registerCommand('autoDoc.generateProjectDocs', generateProjectDocs),
+		vscode.commands.registerCommand('docster.generateDocs', generateDocs),
+		vscode.commands.registerCommand('docster.generateProjectDocs', generateProjectDocs),
 		vscode.languages.registerCodeActionsProvider(LANGUAGE_IDS, new DocFixProvider(), {
 			providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
 		}),
@@ -692,7 +714,13 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidChangeTextDocument(e =>
 			updateDiagnostics(e.document, collection)
 		),
-		vscode.workspace.onDidCloseTextDocument(d => collection.delete(d.uri))
+		vscode.workspace.onDidCloseTextDocument(d => collection.delete(d.uri)),
+		// Refresh warnings when a Docster setting changes
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('docster')) {
+				vscode.workspace.textDocuments.forEach(d => updateDiagnostics(d, collection));
+			}
+		})
 	);
 
 	vscode.workspace.textDocuments.forEach(d => updateDiagnostics(d, collection));
