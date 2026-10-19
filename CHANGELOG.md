@@ -1,3 +1,7 @@
+## [0.1.2]
+
+- Fixed the copyright line in the LICENSE file.
+
 ## [0.1.1]
 
 - Commands renamed from `autoDoc.*` to `docster.*`.
