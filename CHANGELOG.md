@@ -1,4 +1,4 @@
-## [0.1.2]
+## [0.1.3]
 
 - JavaScript and TypeScript: class methods and constructors are now detected.
 - Fixed typed arrow functions (`const f = (a: number): number =>`) and generic functions (`function f<T>(...)`) not being detected.
