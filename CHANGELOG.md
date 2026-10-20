@@ -1,6 +1,10 @@
 ## [0.1.2]
 
-- Fixed the copyright line in the LICENSE file.
+- JavaScript and TypeScript: class methods and constructors are now detected.
+- Fixed typed arrow functions (`const f = (a: number): number =>`) and generic functions (`function f<T>(...)`) not being detected.
+- Function signatures split over several lines are now supported in all languages. Python docstrings go after the closing `):`.
+- Missing-comment warnings now update when you pause typing instead of on every keystroke.
+- Removed a debug message from the console.
 
 ## [0.1.1]
 

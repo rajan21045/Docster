@@ -3,7 +3,7 @@
   "displayName": "Docster",
   "description": "Adds doc comments, flags undocumented functions, and generates documentation for JavaScript, TypeScript, Python, Dart, Java, C, C++, C#, Go and PHP.",
   "icon": "icon.png",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "RajanPoudel",
   "license": "MIT",
   "homepage": "https://github.com/rajan21045/Docster#readme",

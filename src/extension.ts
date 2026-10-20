@@ -63,6 +63,35 @@ function lastWord(p: string): string {
 	return cleaned.match(/(\w+)\s*$/)?.[1] ?? '';
 }
 
+// Last line of a signature whose "(" ... ")" may be split over several lines.
+// If the brackets never balance within `max` lines, only the first line is used.
+function signatureEnd(doc: vscode.TextDocument, line: number, max = 12): number {
+	let open = 0;
+	for (let i = line; i < doc.lineCount && i < line + max; i++) {
+		for (const ch of doc.lineAt(i).text) {
+			if (ch === '(') {
+				open++;
+			} else if (ch === ')') {
+				open--;
+			}
+		}
+		if (open <= 0) {
+			return i;
+		}
+	}
+	return line;
+}
+
+// The whole signature joined into one line, so the one-line patterns still work
+function signatureText(doc: vscode.TextDocument, line: number): string {
+	const end = signatureEnd(doc, line);
+	const parts = [doc.lineAt(line).text];
+	for (let i = line + 1; i <= end; i++) {
+		parts.push(doc.lineAt(i).text.trim());
+	}
+	return parts.join(' ');
+}
+
 function parseWith(
 	text: string,
 	pattern: RegExp,
@@ -143,9 +172,17 @@ function makeBlockSupport(opts: {
 // ---------- JavaScript / TypeScript ----------
 
 const JS_PATTERNS = [
-	/function\s+(\w+)\s*\(([^)]*)\)/,
-	/(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/,
+	// function foo(a, b)   and   function foo<T>(a: T)
+	/function\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)/,
+	// const foo = (a, b) =>   also with generics and a return type: (a): number =>
+	/(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?(?:<[^>]*>\s*)?\(([^)]*)\)\s*(?::\s*[^=]+)?=>/,
+	// class method:   async save(a, b): Promise<void> {
+	// Quotes and brackets are not allowed inside the parameters, so calls such as
+	// it('does x', function () { are not mistaken for methods.
+	/^\s*(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^()'"`]*)\)\s*(?::\s*[^{]+)?\{\s*$/,
 ];
+// Names that look like methods but are really statements
+const JS_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'with'];
 
 const jsSupport = makeBlockSupport({
 	ids: ['javascript', 'typescript', 'javascriptreact', 'typescriptreact'],
@@ -157,9 +194,11 @@ const jsSupport = makeBlockSupport({
 		}
 		for (const pattern of JS_PATTERNS) {
 			const m = text.match(pattern);
-			if (m) {
+			if (m && !JS_SKIP.includes(m[1])) {
 				const params = splitParams(m[2])
 					.map(p => p.split(/[:=]/)[0].trim())
+					// constructor(private x: number) -> x
+					.map(p => p.replace(/^(?:(?:public|private|protected|readonly)\s+)+/, ''))
 					.filter(Boolean)
 					.map((p, i) => (p.startsWith('{') || p.startsWith('[') ? `param${i + 1}` : p));
 				return { name: m[1], params };
@@ -389,11 +428,13 @@ const pySupport: LangSupport = {
 	},
 
 	// Python docstrings go INSIDE the function, right after the def line
+	// (after the closing "):" when the signature is split over several lines)
 	hasComment(doc, line) {
-		if (line + 1 >= doc.lineCount) {
+		const end = signatureEnd(doc, line);
+		if (end + 1 >= doc.lineCount) {
 			return false;
 		}
-		const next = doc.lineAt(line + 1).text.trim();
+		const next = doc.lineAt(end + 1).text.trim();
 		return /^[rRuU]?("""|''')/.test(next);
 	},
 
@@ -418,15 +459,16 @@ const pySupport: LangSupport = {
 		return s + `\n${inner}Returns:\n${inner}"""\n`;
 	},
 
-	insertPosition(_doc, line) {
-		return new vscode.Position(line + 1, 0);
+	insertPosition(doc, line) {
+		return new vscode.Position(signatureEnd(doc, line) + 1, 0);
 	},
 
 	description(doc, line) {
+		const start = signatureEnd(doc, line) + 1;
 		const out: string[] = [];
-		for (let i = line + 1; i < doc.lineCount; i++) {
+		for (let i = start; i < doc.lineCount; i++) {
 			let t = doc.lineAt(i).text.trim();
-			if (i === line + 1) {
+			if (i === start) {
 				t = t.replace(/^[rRuU]?("""|''')/, '');
 			}
 			const closes = /("""|''')$/.test(t);
@@ -490,7 +532,7 @@ function updateDiagnostics(
 	const diagnostics: vscode.Diagnostic[] = [];
 	for (let i = 0; i < doc.lineCount; i++) {
 		const line = doc.lineAt(i);
-		if (support.parse(line.text) && !support.hasComment(doc, i)) {
+		if (support.parse(signatureText(doc, i)) && !support.hasComment(doc, i)) {
 			const d = new vscode.Diagnostic(
 				line.range,
 				'Function has no doc comment',
@@ -501,6 +543,30 @@ function updateDiagnostics(
 		}
 	}
 	collection.set(doc.uri, diagnostics);
+}
+
+// Typing triggers a rescan of the whole file, so wait until the user pauses
+const diagnosticTimers = new Map<string, NodeJS.Timeout>();
+
+function scheduleDiagnostics(
+	doc: vscode.TextDocument,
+	collection: vscode.DiagnosticCollection
+) {
+	if (!getSupport(doc)) {
+		return;
+	}
+	const key = doc.uri.toString();
+	const existing = diagnosticTimers.get(key);
+	if (existing) {
+		clearTimeout(existing);
+	}
+	diagnosticTimers.set(
+		key,
+		setTimeout(() => {
+			diagnosticTimers.delete(key);
+			updateDiagnostics(doc, collection);
+		}, 300)
+	);
 }
 
 class DocFixProvider implements vscode.CodeActionProvider {
@@ -520,7 +586,7 @@ class DocFixProvider implements vscode.CodeActionProvider {
 			}
 			const lineNo = d.range.start.line;
 			const text = doc.lineAt(lineNo).text;
-			const fn = support.parse(text);
+			const fn = support.parse(signatureText(doc, lineNo));
 			if (!fn) {
 				continue;
 			}
@@ -556,7 +622,7 @@ function buildFileDocs(
 	let count = 0;
 
 	for (let i = 0; i < doc.lineCount; i++) {
-		const fn = support.parse(doc.lineAt(i).text);
+		const fn = support.parse(signatureText(doc, i));
 		if (!fn) {
 			continue;
 		}
@@ -671,7 +737,6 @@ async function generateProjectDocs() {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Docster activated');
 	const collection = vscode.languages.createDiagnosticCollection('docster');
 
 	const addComment = vscode.commands.registerCommand('docster.addComment', () => {
@@ -687,7 +752,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const lineNo = editor.selection.active.line;
 		const text = doc.lineAt(lineNo).text;
-		const fn = support.parse(text);
+		const fn = support.parse(signatureText(doc, lineNo));
 		if (!fn) {
 			vscode.window.showWarningMessage('Put your cursor on a function line.');
 			return;
@@ -712,9 +777,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.workspace.onDidOpenTextDocument(d => updateDiagnostics(d, collection)),
 		vscode.workspace.onDidChangeTextDocument(e =>
-			updateDiagnostics(e.document, collection)
+			scheduleDiagnostics(e.document, collection)
 		),
-		vscode.workspace.onDidCloseTextDocument(d => collection.delete(d.uri)),
+		vscode.workspace.onDidCloseTextDocument(d => {
+			const key = d.uri.toString();
+			const timer = diagnosticTimers.get(key);
+			if (timer) {
+				clearTimeout(timer);
+				diagnosticTimers.delete(key);
+			}
+			collection.delete(d.uri);
+		}),
 		// Refresh warnings when a Docster setting changes
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('docster')) {

@@ -64,8 +64,9 @@ There is no default keyboard shortcut, to avoid clashing with other extensions. 
 
 ## Known Limitations
 
-* Docster reads code line by line, so a function signature must fit on one line.
-* In JavaScript and TypeScript, `function` declarations and `const name = (...) =>` arrow functions are detected. Class methods are not detected yet.
+* Docster reads signatures with simple pattern matching, so very unusual formatting can be missed. A signature split over several lines is read up to 12 lines.
+* In JavaScript and TypeScript, `function` declarations, `const name = (...) =>` arrow functions and class methods are detected. Arrow functions assigned as class properties are not detected yet.
+* Methods with callback-typed parameters, like `(cb: (x: number) => void)`, are not detected yet.
 * Destructured parameters in JavaScript are named `param1`, `param2` and so on. Rename them by hand.
 * Generated comments contain placeholder text (`Description of ...`) for you to fill in.
 
