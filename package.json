@@ -104,6 +104,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
+    "test:unit": "npm run compile && mocha --ui tdd out/test/parsers.test.js",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -114,6 +115,7 @@
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^4.0.0",
     "eslint": "^10.5.0",
+    "mocha": "^12.0.3",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.1"
   },
