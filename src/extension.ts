@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { LangSupport } from './core/types';
+import { signatureAt } from './core/helpers';
 import { getSupport, LANGUAGE_IDS } from './languages';
 
 // Reads the "docster.pythonDocstringStyle" setting (google or numpy)
@@ -30,7 +31,7 @@ function updateDiagnostics(
 	const diagnostics: vscode.Diagnostic[] = [];
 	for (let i = 0; i < doc.lineCount; i++) {
 		const line = doc.lineAt(i);
-		if (support.parse(line.text) && !support.hasComment(doc, i)) {
+		if (support.parse(signatureAt(doc, i)) && !support.hasComment(doc, i)) {
 			const d = new vscode.Diagnostic(
 				line.range,
 				'Function has no doc comment',
@@ -60,7 +61,7 @@ class DocFixProvider implements vscode.CodeActionProvider {
 			}
 			const lineNo = d.range.start.line;
 			const text = doc.lineAt(lineNo).text;
-			const fn = support.parse(text);
+			const fn = support.parse(signatureAt(doc, lineNo));
 			if (!fn) {
 				continue;
 			}
@@ -96,7 +97,7 @@ function buildFileDocs(
 	let count = 0;
 
 	for (let i = 0; i < doc.lineCount; i++) {
-		const fn = support.parse(doc.lineAt(i).text);
+		const fn = support.parse(signatureAt(doc, i));
 		if (!fn) {
 			continue;
 		}
@@ -227,7 +228,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const lineNo = editor.selection.active.line;
 		const text = doc.lineAt(lineNo).text;
-		const fn = support.parse(text);
+		const fn = support.parse(signatureAt(doc, lineNo));
 		if (!fn) {
 			vscode.window.showWarningMessage('Put your cursor on a function line.');
 			return;

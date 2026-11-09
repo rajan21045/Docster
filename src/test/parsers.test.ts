@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { fakeDoc } from './helpers';
-import { splitParams } from '../core/helpers';
+import { splitParams, readSignature } from '../core/helpers';
 import { pySupport } from '../languages/python';
 import { jsSupport } from '../languages/javascript';
 import { javaSupport } from '../languages/java';
@@ -59,5 +59,37 @@ suite('java', () => {
 	test('comment above @Override counts', () => {
 		const doc = fakeDoc('/** hi */\n@Override\npublic void run() {');
 		assert.strictEqual(javaSupport.hasComment(doc, 2), true);
+	});
+});
+
+suite('multi-line signatures', () => {
+	test('javascript', () => {
+		const doc = fakeDoc('function f(a,\n  b) {\n}');
+		assert.deepStrictEqual(
+			jsSupport.parse(readSignature(doc, 0)),
+			{ name: 'f', params: ['a', 'b'] }
+		);
+	});
+	test('python', () => {
+		const doc = fakeDoc('def f(a,\n      b):\n    pass');
+		assert.deepStrictEqual(
+			pySupport.parse(readSignature(doc, 0)),
+			{ name: 'f', params: ['a', 'b'] }
+		);
+	});
+	test('single line is unchanged', () => {
+		const doc = fakeDoc('def f(a):');
+		assert.strictEqual(readSignature(doc, 0), 'def f(a):');
+	});
+});
+
+suite('python multi-line', () => {
+	test('docstring is found after the last parameter line', () => {
+		const doc = fakeDoc('def f(a,\n      b):\n    """Hi"""\n    pass');
+		assert.strictEqual(pySupport.hasComment(doc, 0), true);
+	});
+	test('docstring is inserted after the signature, not inside it', () => {
+		const doc = fakeDoc('def f(a,\n      b):\n    pass');
+		assert.strictEqual(pySupport.insertLine(doc, 0), 2);
 	});
 });

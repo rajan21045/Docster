@@ -123,3 +123,47 @@ export function makeBlockSupport(opts: {
 		},
 	};
 }
+// Joins a signature that spans several lines, e.g. "def f(a,\n  b):"
+export function readSignature(doc: DocLike, line: number, maxLines = 8): string {
+	let text = '';
+	let depth = 0;
+	for (let i = line; i < Math.min(doc.lineCount, line + maxLines); i++) {
+		const t = doc.lineAt(i).text;
+		text += (i === line ? '' : ' ') + t.trim();
+		for (const ch of t) {
+			if (ch === '(') {
+				depth++;
+			} else if (ch === ')') {
+				depth--;
+			}
+		}
+		if (depth <= 0) {
+			break;
+		}
+	}
+	return text;
+}
+
+// Only scans further lines when the line contains "(" so most lines stay cheap
+export function signatureAt(doc: DocLike, line: number): string {
+	const text = doc.lineAt(line).text;
+	return text.includes('(') ? readSignature(doc, line) : text;
+}
+
+// Line number where the signature's parentheses close (same line if single-line)
+export function signatureEndLine(doc: DocLike, line: number, maxLines = 8): number {
+	let depth = 0;
+	for (let i = line; i < Math.min(doc.lineCount, line + maxLines); i++) {
+		for (const ch of doc.lineAt(i).text) {
+			if (ch === '(') {
+				depth++;
+			} else if (ch === ')') {
+				depth--;
+			}
+		}
+		if (depth <= 0) {
+			return i;
+		}
+	}
+	return line;
+}
