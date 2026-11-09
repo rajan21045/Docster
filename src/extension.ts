@@ -44,6 +44,30 @@ function updateDiagnostics(
 	collection.set(doc.uri, diagnostics);
 }
 
+// Typing triggers a rescan of the whole file, so wait until the user pauses
+const diagnosticTimers = new Map<string, NodeJS.Timeout>();
+
+function scheduleDiagnostics(
+	doc: vscode.TextDocument,
+	collection: vscode.DiagnosticCollection
+) {
+	if (!getSupport(doc.languageId)) {
+		return;
+	}
+	const key = doc.uri.toString();
+	const existing = diagnosticTimers.get(key);
+	if (existing) {
+		clearTimeout(existing);
+	}
+	diagnosticTimers.set(
+		key,
+		setTimeout(() => {
+			diagnosticTimers.delete(key);
+			updateDiagnostics(doc, collection);
+		}, 300)
+	);
+}
+
 class DocFixProvider implements vscode.CodeActionProvider {
 	provideCodeActions(
 		doc: vscode.TextDocument,
@@ -212,7 +236,6 @@ async function generateProjectDocs() {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Docster activated');
 	const collection = vscode.languages.createDiagnosticCollection('docster');
 
 	const addComment = vscode.commands.registerCommand('docster.addComment', () => {
@@ -256,9 +279,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.workspace.onDidOpenTextDocument(d => updateDiagnostics(d, collection)),
 		vscode.workspace.onDidChangeTextDocument(e =>
-			updateDiagnostics(e.document, collection)
+			scheduleDiagnostics(e.document, collection)
 		),
-		vscode.workspace.onDidCloseTextDocument(d => collection.delete(d.uri)),
+		vscode.workspace.onDidCloseTextDocument(d => {
+			const key = d.uri.toString();
+			const timer = diagnosticTimers.get(key);
+			if (timer) {
+				clearTimeout(timer);
+				diagnosticTimers.delete(key);
+			}
+			collection.delete(d.uri);
+		}),
 		// Refresh warnings when a Docster setting changes
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('docster')) {

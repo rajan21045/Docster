@@ -47,6 +47,35 @@ export function lastWord(p: string): string {
 	return cleaned.match(/(\w+)\s*$/)?.[1] ?? '';
 }
 
+// Last line of a signature whose "(" ... ")" may be split over several lines.
+// If the brackets never balance within `max` lines, only the first line is used.
+export function signatureEndLine(doc: DocLike, line: number, max = 12): number {
+	let open = 0;
+	for (let i = line; i < doc.lineCount && i < line + max; i++) {
+		for (const ch of doc.lineAt(i).text) {
+			if (ch === '(') {
+				open++;
+			} else if (ch === ')') {
+				open--;
+			}
+		}
+		if (open <= 0) {
+			return i;
+		}
+	}
+	return line;
+}
+
+// The whole signature joined into one line, so the one-line patterns still work
+export function signatureAt(doc: DocLike, line: number): string {
+	const end = signatureEndLine(doc, line);
+	const parts = [doc.lineAt(line).text];
+	for (let i = line + 1; i <= end; i++) {
+		parts.push(doc.lineAt(i).text.trim());
+	}
+	return parts.join(' ');
+}
+
 export function parseWith(
 	text: string,
 	pattern: RegExp,
@@ -122,48 +151,4 @@ export function makeBlockSupport(opts: {
 			return lines.join(' ');
 		},
 	};
-}
-// Joins a signature that spans several lines, e.g. "def f(a,\n  b):"
-export function readSignature(doc: DocLike, line: number, maxLines = 8): string {
-	let text = '';
-	let depth = 0;
-	for (let i = line; i < Math.min(doc.lineCount, line + maxLines); i++) {
-		const t = doc.lineAt(i).text;
-		text += (i === line ? '' : ' ') + t.trim();
-		for (const ch of t) {
-			if (ch === '(') {
-				depth++;
-			} else if (ch === ')') {
-				depth--;
-			}
-		}
-		if (depth <= 0) {
-			break;
-		}
-	}
-	return text;
-}
-
-// Only scans further lines when the line contains "(" so most lines stay cheap
-export function signatureAt(doc: DocLike, line: number): string {
-	const text = doc.lineAt(line).text;
-	return text.includes('(') ? readSignature(doc, line) : text;
-}
-
-// Line number where the signature's parentheses close (same line if single-line)
-export function signatureEndLine(doc: DocLike, line: number, maxLines = 8): number {
-	let depth = 0;
-	for (let i = line; i < Math.min(doc.lineCount, line + maxLines); i++) {
-		for (const ch of doc.lineAt(i).text) {
-			if (ch === '(') {
-				depth++;
-			} else if (ch === ')') {
-				depth--;
-			}
-		}
-		if (depth <= 0) {
-			return i;
-		}
-	}
-	return line;
 }

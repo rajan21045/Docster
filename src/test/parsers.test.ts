@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { fakeDoc } from './helpers';
-import { splitParams, readSignature } from '../core/helpers';
+import { splitParams, signatureAt } from '../core/helpers';
 import { pySupport } from '../languages/python';
 import { jsSupport } from '../languages/javascript';
 import { javaSupport } from '../languages/java';
@@ -46,6 +46,33 @@ suite('javascript', () => {
 	});
 });
 
+suite('javascript class methods and typed arrows', () => {
+	test('typed arrow function', () => {
+		assert.deepStrictEqual(
+			jsSupport.parse('const add = (a: number, b: number): number => a + b'),
+			{ name: 'add', params: ['a', 'b'] }
+		);
+	});
+	test('class method with return type', () => {
+		assert.deepStrictEqual(
+			jsSupport.parse('    async save(a, b): Promise<void> {'),
+			{ name: 'save', params: ['a', 'b'] }
+		);
+	});
+	test('constructor parameter properties', () => {
+		assert.deepStrictEqual(
+			jsSupport.parse('  constructor(private x: number, public y: string) {')?.params,
+			['x', 'y']
+		);
+	});
+	test('if statement is not a method', () => {
+		assert.strictEqual(jsSupport.parse('    if (x > 1) {'), undefined);
+	});
+	test('test-runner call is not a method', () => {
+		assert.strictEqual(jsSupport.parse("  it('does x', function () {"), undefined);
+	});
+});
+
 suite('java', () => {
 	test('does not treat "if (x)" as a method', () => {
 		assert.strictEqual(javaSupport.parse('    if (x > 1) {'), undefined);
@@ -66,20 +93,22 @@ suite('multi-line signatures', () => {
 	test('javascript', () => {
 		const doc = fakeDoc('function f(a,\n  b) {\n}');
 		assert.deepStrictEqual(
-			jsSupport.parse(readSignature(doc, 0)),
+			jsSupport.parse(signatureAt(doc, 0)),
 			{ name: 'f', params: ['a', 'b'] }
 		);
 	});
 	test('python', () => {
 		const doc = fakeDoc('def f(a,\n      b):\n    pass');
 		assert.deepStrictEqual(
-			pySupport.parse(readSignature(doc, 0)),
+			pySupport.parse(signatureAt(doc, 0)),
 			{ name: 'f', params: ['a', 'b'] }
 		);
 	});
 	test('single line is unchanged', () => {
-		const doc = fakeDoc('def f(a):');
-		assert.strictEqual(readSignature(doc, 0), 'def f(a):');
+		assert.strictEqual(signatureAt(fakeDoc('def f(a):'), 0), 'def f(a):');
+	});
+	test('unbalanced brackets fall back to the first line', () => {
+		assert.strictEqual(signatureAt(fakeDoc('foo(\nbar'), 0), 'foo(');
 	});
 });
 
