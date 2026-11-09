@@ -1,3 +1,10 @@
+## [0.1.4]
+
+### Refactored & Improved
+- **Modularized Language Parsers**: Decoupled individual language providers, regex patterns, comment builders, and parsing logic from `src/extension.ts` into dedicated modules to improve maintainability and extensibility.
+- **Enhanced Test Suite**: Replaced placeholder tests in `src/test/extension.test.ts` with comprehensive unit tests covering signature extraction, docstring generation, and diagnostic triggers.
+- **Improved Parsing Reliability**: Adopted structured token parsing alternatives to reduce limitations associated with regular expression-based function signature matching (such as multi-line signatures and destructured arguments).
+
 ## [0.1.3]
 
 - JavaScript and TypeScript: class methods and constructors are now detected.
