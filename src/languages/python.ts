@@ -29,7 +29,8 @@ export const pySupport: LangSupport = {
 
     // Style comes from opts (google or numpy); extension.ts reads the setting
     build(indent, fn, opts) {
-        const inner = indent + '    ';
+        const unit = opts?.indentUnit ?? '    ';
+        const inner = indent + unit;
         const style = opts?.pythonStyle ?? 'google';
         let s = `${inner}"""${PLACEHOLDER}${fn.name}\n`;
         if (style === 'numpy') {
@@ -41,8 +42,7 @@ export const pySupport: LangSupport = {
         }
         if (fn.params.length) {
             s += `\n${inner}Args:\n`;
-            s += fn.params.map(p => `${inner}    ${p}:\n`).join('');
-        }
+            s += fn.params.map(p => `${inner}${unit}${p}:\n`).join('');        }
         return s + `\n${inner}Returns:\n${inner}"""\n`;
     },
 
