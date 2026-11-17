@@ -1,5 +1,4 @@
-import { makeBlockSupport } from '../core/block';
-import { lastWord, parseWith, splitParams } from '../core/utils';
+import { makeBlockSupport, parseWith, splitParams, lastWord } from '../core/helpers';
 
 const JAVA_PATTERN =
 	/^\s*(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)*(?:<[^()]*>\s+)?[\w.]+(?:<[^()]*>)?(?:\[\])*\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w.,\s]+)?\{?\s*$/;

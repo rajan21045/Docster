@@ -1,5 +1,5 @@
 import { LangSupport } from '../core/types';
-import { parseWith, splitParams } from '../core/utils';
+import { parseWith, splitParams } from '../core/helpers';
 
 const GO_PATTERN = /^func\s+(?:\([^)]*\)\s*)?(\w+)\s*(?:\[[^\]]*\])?\s*\(([^)]*)\)/;
 
@@ -14,23 +14,29 @@ export const goSupport: LangSupport = {
 		);
 	},
 
-	hasComment: (lines, line) => line > 0 && lines[line - 1].trim().startsWith('//'),
+	hasComment(doc, line) {
+		return line > 0 && doc.lineAt(line - 1).text.trim().startsWith('//');
+	},
 
 	// Go style: the comment starts with the function name
-	build: (indent, fn) => `${indent}// ${fn.name} TODO: describe what ${fn.name} does.\n`,
+	build(indent, fn) {
+		return `${indent}// ${fn.name} TODO: describe what ${fn.name} does.\n`;
+	},
 
-	insertLine: (_lines, line) => line,
+	insertLine(_doc, line) {
+		return line;
+	},
 
-	description(lines, line) {
-		const out: string[] = [];
+	description(doc, line) {
+		const lines: string[] = [];
 		let i = line - 1;
-		while (i >= 0 && lines[i].trim().startsWith('//')) {
-			const clean = lines[i].trim().replace(/^\/\/+\s?/, '').trim();
+		while (i >= 0 && doc.lineAt(i).text.trim().startsWith('//')) {
+			const clean = doc.lineAt(i).text.trim().replace(/^\/\/+\s?/, '').trim();
 			if (clean && !clean.includes('TODO: describe')) {
-				out.unshift(clean);
+				lines.unshift(clean);
 			}
 			i--;
 		}
-		return out.join(' ');
+		return lines.join(' ');
 	},
 };

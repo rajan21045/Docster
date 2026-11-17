@@ -1,57 +1,71 @@
 import * as vscode from 'vscode';
-import { buildFileDocs } from './core/docs';
-import { BuildOptions } from './core/types';
-import { getSupport, LANGUAGE_IDS, languageIdForPath } from './languages';
+import { LangSupport } from './core/types';
+import { signatureAt } from './core/helpers';
+import { getSupport, LANGUAGE_IDS } from './languages';
 
-const DEBOUNCE_MS = 300;
-const ANALYZED_SCHEMES = ['file', 'untitled'];
-
-// ---------- Helpers ----------
-
-function isAnalyzable(doc: vscode.TextDocument): boolean {
-	return ANALYZED_SCHEMES.includes(doc.uri.scheme);
-}
-
-function linesOf(doc: vscode.TextDocument): string[] {
-	return doc.getText().split(/\r?\n/);
-}
-
-// Uses the editor's own indentation settings (tabs or N spaces) instead of a hardcoded 4 spaces
-function buildOptions(doc: vscode.TextDocument): BuildOptions {
-	const editor = vscode.window.visibleTextEditors.find(e => e.document === doc);
-	const tabSize = typeof editor?.options.tabSize === 'number' ? editor.options.tabSize : 4;
-	const insertSpaces = editor?.options.insertSpaces !== false;
-	const pythonStyle = vscode.workspace
+// Reads the "docster.pythonDocstringStyle" setting (google or numpy)
+function pythonStyle(): 'google' | 'numpy' {
+	return vscode.workspace
 		.getConfiguration('docster')
 		.get<'google' | 'numpy'>('pythonDocstringStyle', 'google');
-	return { indentUnit: insertSpaces ? ' '.repeat(tabSize) : '\t', pythonStyle };
 }
 
-// ---------- Diagnostics ----------
-
-function updateDiagnostics(doc: vscode.TextDocument, collection: vscode.DiagnosticCollection) {
+function updateDiagnostics(
+	doc: vscode.TextDocument,
+	collection: vscode.DiagnosticCollection
+) {
 	const support = getSupport(doc.languageId);
-	if (!support || !isAnalyzable(doc)) {
+	if (!support) {
 		return;
 	}
 
-	const enabled = vscode.workspace.getConfiguration('docster').get<boolean>('warnMissingComments', true);
+	// Respect the "docster.warnMissingComments" setting
+	const enabled = vscode.workspace
+		.getConfiguration('docster')
+		.get<boolean>('warnMissingComments', true);
 	if (!enabled) {
 		collection.delete(doc.uri);
 		return;
 	}
 
-	const lines = linesOf(doc);
 	const diagnostics: vscode.Diagnostic[] = [];
-	for (let i = 0; i < lines.length; i++) {
-		if (support.parse(lines[i]) && !support.hasComment(lines, i)) {
-			const range = new vscode.Range(i, 0, i, lines[i].length);
-			const d = new vscode.Diagnostic(range, 'Function has no doc comment', vscode.DiagnosticSeverity.Warning);
+	for (let i = 0; i < doc.lineCount; i++) {
+		const line = doc.lineAt(i);
+		if (support.parse(signatureAt(doc, i)) && !support.hasComment(doc, i)) {
+			const d = new vscode.Diagnostic(
+				line.range,
+				'Function has no doc comment',
+				vscode.DiagnosticSeverity.Warning
+			);
 			d.source = 'docster';
 			diagnostics.push(d);
 		}
 	}
 	collection.set(doc.uri, diagnostics);
+}
+
+// Typing triggers a rescan of the whole file, so wait until the user pauses
+const diagnosticTimers = new Map<string, NodeJS.Timeout>();
+
+function scheduleDiagnostics(
+	doc: vscode.TextDocument,
+	collection: vscode.DiagnosticCollection
+) {
+	if (!getSupport(doc.languageId)) {
+		return;
+	}
+	const key = doc.uri.toString();
+	const existing = diagnosticTimers.get(key);
+	if (existing) {
+		clearTimeout(existing);
+	}
+	diagnosticTimers.set(
+		key,
+		setTimeout(() => {
+			diagnosticTimers.delete(key);
+			updateDiagnostics(doc, collection);
+		}, 300)
+	);
 }
 
 class DocFixProvider implements vscode.CodeActionProvider {
@@ -64,26 +78,29 @@ class DocFixProvider implements vscode.CodeActionProvider {
 		if (!support) {
 			return [];
 		}
-		const lines = linesOf(doc);
 		const actions: vscode.CodeAction[] = [];
 		for (const d of context.diagnostics) {
 			if (d.source !== 'docster') {
 				continue;
 			}
 			const lineNo = d.range.start.line;
-			const fn = support.parse(lines[lineNo] ?? '');
+			const text = doc.lineAt(lineNo).text;
+			const fn = support.parse(signatureAt(doc, lineNo));
 			if (!fn) {
 				continue;
 			}
-			const indent = lines[lineNo].match(/^\s*/)![0];
-			const action = new vscode.CodeAction('Add doc comment', vscode.CodeActionKind.QuickFix);
+			const indent = text.match(/^\s*/)![0];
+			const action = new vscode.CodeAction(
+				'Add doc comment',
+				vscode.CodeActionKind.QuickFix
+			);
 			action.diagnostics = [d];
 			action.isPreferred = true;
 			action.edit = new vscode.WorkspaceEdit();
 			action.edit.insert(
 				doc.uri,
-				new vscode.Position(support.insertLine(lines, lineNo), 0),
-				support.build(indent, fn, buildOptions(doc))
+				new vscode.Position(support.insertLine(doc, lineNo), 0),
+				support.build(indent, fn, { pythonStyle: pythonStyle() })
 			);
 			actions.push(action);
 		}
@@ -91,12 +108,41 @@ class DocFixProvider implements vscode.CodeActionProvider {
 	}
 }
 
-// ---------- Commands ----------
+// Builds the Markdown for one file. level 1 = "# title", level 2 = "## title"
+function buildFileDocs(
+	doc: vscode.TextDocument,
+	support: LangSupport,
+	title: string,
+	level: number
+): { md: string; count: number } {
+	const fileHeading = '#'.repeat(level);
+	const fnHeading = '#'.repeat(level + 1);
+	let md = `${fileHeading} ${title}\n\n`;
+	let count = 0;
+
+	for (let i = 0; i < doc.lineCount; i++) {
+		const fn = support.parse(signatureAt(doc, i));
+		if (!fn) {
+			continue;
+		}
+		count++;
+		const description = support.description(doc, i) || '_No description yet._';
+		md += `${fnHeading} ${fn.name}(${fn.params.join(', ')})\n\n${description}\n\n`;
+		if (fn.params.length) {
+			md += '**Parameters**\n\n';
+			md += fn.params.map(p => `- \`${p}\``).join('\n') + '\n\n';
+		}
+	}
+	return { md, count };
+}
 
 // Saves DOCS.md in the folder, or shows an unsaved page if no folder is given
 async function outputDocs(md: string, folder: vscode.WorkspaceFolder | undefined) {
 	if (!folder) {
-		const out = await vscode.workspace.openTextDocument({ content: md, language: 'markdown' });
+		const out = await vscode.workspace.openTextDocument({
+			content: md,
+			language: 'markdown',
+		});
 		await vscode.window.showTextDocument(out, vscode.ViewColumn.Beside);
 		return;
 	}
@@ -115,21 +161,24 @@ async function generateDocs() {
 	const doc = editor.document;
 	const support = getSupport(doc.languageId);
 	if (!support) {
-		vscode.window.showWarningMessage(`This language is not supported yet. Supported: ${LANGUAGE_IDS.join(', ')}`);
+		vscode.window.showWarningMessage(
+			`This language is not supported yet. Supported: ${LANGUAGE_IDS.join(', ')}`
+		);
 		return;
 	}
+
 	const fileName = doc.uri.path.split('/').pop() ?? 'file';
-	const { md, count } = buildFileDocs(linesOf(doc), support, fileName, 1);
+	const { md, count } = buildFileDocs(doc, support, fileName, 1);
+
 	if (count === 0) {
 		vscode.window.showWarningMessage('No functions found in this file.');
 		return;
 	}
+
 	await outputDocs(md, undefined);
 }
 
-// Project docs are saved to DOCS.md in the first workspace folder.
-// Files are read straight from disk, so they are never opened as editors
-// and never trigger the missing-comment diagnostics.
+// Project docs are saved to DOCS.md in the first workspace folder
 async function generateProjectDocs() {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (!folder) {
@@ -147,23 +196,24 @@ async function generateProjectDocs() {
 	let body = '';
 	let totalFunctions = 0;
 	let totalFiles = 0;
-	const decoder = new TextDecoder('utf-8');
 
 	await vscode.window.withProgress(
-		{ location: vscode.ProgressLocation.Notification, title: 'Generating project documentation...' },
+		{
+			location: vscode.ProgressLocation.Notification,
+			title: 'Generating project documentation...',
+		},
 		async () => {
 			for (const uri of files) {
 				const rel = vscode.workspace.asRelativePath(uri, false);
 				if (rel.endsWith('.d.ts')) {
 					continue;
 				}
-				const languageId = languageIdForPath(rel);
-				const support = languageId ? getSupport(languageId) : undefined;
+				const doc = await vscode.workspace.openTextDocument(uri);
+				const support = getSupport(doc.languageId);
 				if (!support) {
 					continue;
 				}
-				const bytes = await vscode.workspace.fs.readFile(uri);
-				const result = buildFileDocs(decoder.decode(bytes).split(/\r?\n/), support, rel, 2);
+				const result = buildFileDocs(doc, support, rel, 2);
 				if (result.count === 0) {
 					continue;
 				}
@@ -178,76 +228,69 @@ async function generateProjectDocs() {
 		vscode.window.showWarningMessage('No functions found in this project.');
 		return;
 	}
-	const header = `# Project Documentation\n\n${totalFunctions} functions in ${totalFiles} files.\n\n`;
+
+	const header =
+		`# Project Documentation\n\n` +
+		`${totalFunctions} functions in ${totalFiles} files.\n\n`;
 	await outputDocs(header + body, folder);
 }
 
-function addComment() {
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) {
-		return;
-	}
-	const doc = editor.document;
-	const support = getSupport(doc.languageId);
-	if (!support) {
-		vscode.window.showWarningMessage('This language is not supported yet.');
-		return;
-	}
-	const lines = linesOf(doc);
-	const lineNo = editor.selection.active.line;
-	const fn = support.parse(lines[lineNo]);
-	if (!fn) {
-		vscode.window.showWarningMessage('Put your cursor on a function line.');
-		return;
-	}
-	if (support.hasComment(lines, lineNo)) {
-		vscode.window.showInformationMessage('This function already has a comment.');
-		return;
-	}
-	const indent = lines[lineNo].match(/^\s*/)![0];
-	editor.edit(edit =>
-		edit.insert(
-			new vscode.Position(support.insertLine(lines, lineNo), 0),
-			support.build(indent, fn, buildOptions(doc))
-		)
-	);
-}
-
-// ---------- Activation ----------
-
 export function activate(context: vscode.ExtensionContext) {
 	const collection = vscode.languages.createDiagnosticCollection('docster');
-	const timers = new Map<string, NodeJS.Timeout>();
 
-	// Re-scans a document 300 ms after the last keystroke instead of on every edit
-	const schedule = (doc: vscode.TextDocument) => {
-		if (!isAnalyzable(doc)) {
+	const addComment = vscode.commands.registerCommand('docster.addComment', () => {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) {
 			return;
 		}
-		const key = doc.uri.toString();
-		clearTimeout(timers.get(key));
-		timers.set(key, setTimeout(() => {
-			timers.delete(key);
-			updateDiagnostics(doc, collection);
-		}, DEBOUNCE_MS));
-	};
+		const doc = editor.document;
+		const support = getSupport(doc.languageId);
+		if (!support) {
+			vscode.window.showWarningMessage('This language is not supported yet.');
+			return;
+		}
+		const lineNo = editor.selection.active.line;
+		const text = doc.lineAt(lineNo).text;
+		const fn = support.parse(signatureAt(doc, lineNo));
+		if (!fn) {
+			vscode.window.showWarningMessage('Put your cursor on a function line.');
+			return;
+		}
+		if (support.hasComment(doc, lineNo)) {
+			vscode.window.showInformationMessage('This function already has a comment.');
+			return;
+		}
+		const indent = text.match(/^\s*/)![0];
+		editor.edit(edit =>
+			edit.insert(
+				new vscode.Position(support.insertLine(doc, lineNo), 0),
+				support.build(indent, fn, { pythonStyle: pythonStyle() })
+			)
+		);
+	});
 
 	context.subscriptions.push(
 		collection,
-		{ dispose: () => timers.forEach(t => clearTimeout(t)) },
-		vscode.commands.registerCommand('docster.addComment', addComment),
+		addComment,
 		vscode.commands.registerCommand('docster.generateDocs', generateDocs),
 		vscode.commands.registerCommand('docster.generateProjectDocs', generateProjectDocs),
 		vscode.languages.registerCodeActionsProvider(LANGUAGE_IDS, new DocFixProvider(), {
 			providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
 		}),
 		vscode.workspace.onDidOpenTextDocument(d => updateDiagnostics(d, collection)),
-		vscode.workspace.onDidChangeTextDocument(e => schedule(e.document)),
+		vscode.workspace.onDidChangeTextDocument(e =>
+			scheduleDiagnostics(e.document, collection)
+		),
 		vscode.workspace.onDidCloseTextDocument(d => {
-			clearTimeout(timers.get(d.uri.toString()));
-			timers.delete(d.uri.toString());
+			const key = d.uri.toString();
+			const timer = diagnosticTimers.get(key);
+			if (timer) {
+				clearTimeout(timer);
+				diagnosticTimers.delete(key);
+			}
 			collection.delete(d.uri);
 		}),
+		// Refresh warnings when a Docster setting changes
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('docster')) {
 				vscode.workspace.textDocuments.forEach(d => updateDiagnostics(d, collection));

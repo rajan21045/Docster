@@ -1,5 +1,5 @@
-import { LangSupport, PLACEHOLDER } from '../core/types';
-import { firstLineAboveDecorators, lastWord, parseWith, splitParams } from '../core/utils';
+import { LangSupport } from '../core/types';
+import { PLACEHOLDER, firstLineAboveDecorators, parseWith, splitParams, lastWord } from '../core/helpers';
 
 const CS_PATTERN =
 	/^\s*(?:\[[^\]]*\]\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|async|sealed|extern|unsafe|partial|new|readonly)\s+)*[\w.]+(?:<[^()]*>)?(?:\[\])*\??\s+(\w+)\s*(?:<[^()]*>)?\s*\(([^)]*)\)\s*(?:where\s[^{=]*)?(?:\{|=>.*)?\s*$/;
@@ -16,9 +16,9 @@ export const csSupport: LangSupport = {
 		return parseWith(text, CS_PATTERN, CS_SKIP, raw => splitParams(raw).map(lastWord).filter(Boolean));
 	},
 
-	hasComment(lines, line) {
-		const l = firstLineAboveDecorators(lines, line, CS_MARKERS);
-		return l > 0 && lines[l - 1].trim().startsWith('///');
+	hasComment(doc, line) {
+		const l = firstLineAboveDecorators(doc, line, CS_MARKERS);
+		return l > 0 && doc.lineAt(l - 1).text.trim().startsWith('///');
 	},
 
 	build(indent, fn) {
@@ -31,21 +31,23 @@ export const csSupport: LangSupport = {
 		);
 	},
 
-	insertLine: (lines, line) => firstLineAboveDecorators(lines, line, CS_MARKERS),
+	insertLine(doc, line) {
+		return firstLineAboveDecorators(doc, line, CS_MARKERS);
+	},
 
-	description(lines, line) {
-		const out: string[] = [];
-		let i = firstLineAboveDecorators(lines, line, CS_MARKERS) - 1;
-		while (i >= 0 && lines[i].trim().startsWith('///')) {
-			const raw = lines[i].trim().replace(/^\/\/\/\s?/, '').trim();
+	description(doc, line) {
+		const lines: string[] = [];
+		let i = firstLineAboveDecorators(doc, line, CS_MARKERS) - 1;
+		while (i >= 0 && doc.lineAt(i).text.trim().startsWith('///')) {
+			const raw = doc.lineAt(i).text.trim().replace(/^\/\/\/\s?/, '').trim();
 			if (!/^<(param|returns|typeparam|exception)/.test(raw)) {
 				const clean = raw.replace(/<[^>]+>/g, '').trim();
 				if (clean && !clean.startsWith(PLACEHOLDER)) {
-					out.unshift(clean);
+					lines.unshift(clean);
 				}
 			}
 			i--;
 		}
-		return out.join(' ');
+		return lines.join(' ');
 	},
 };

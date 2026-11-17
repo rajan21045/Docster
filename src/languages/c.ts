@@ -1,5 +1,4 @@
-import { makeBlockSupport } from '../core/block';
-import { lastWord, parseWith, splitParams } from '../core/utils';
+import { makeBlockSupport, parseWith, splitParams, lastWord } from '../core/helpers';
 
 const C_PATTERN =
 	/^\s*(?:(?:static|inline|extern|const|unsigned|signed|struct|enum|virtual|constexpr)\s+)*[\w:<>*&]+[\s*&]+(?:\w+::)*(\w+)\s*\(([^)]*)\)\s*(?:const\s*)?(?:noexcept\s*)?\{?\s*$/;
