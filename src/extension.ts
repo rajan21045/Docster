@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { LangSupport } from './core/types';
+import { DocLike, LangSupport } from './core/types';
 import { signatureAt } from './core/helpers';
 import { getSupport, LANGUAGE_IDS } from './languages';
 
@@ -10,12 +10,43 @@ function pythonStyle(): 'google' | 'numpy' {
 		.get<'google' | 'numpy'>('pythonDocstringStyle', 'google');
 }
 
+// Only real files are analyzed, not the Output panel, git diff views, etc.
+const ANALYZED_SCHEMES = ['file', 'untitled'];
+
+function isAnalyzable(doc: vscode.TextDocument): boolean {
+	return ANALYZED_SCHEMES.includes(doc.uri.scheme);
+}
+
+// Uses the editor's own tab/space setting for Python docstrings
+function buildOptions(doc: vscode.TextDocument) {
+	const editor = vscode.window.visibleTextEditors.find(e => e.document === doc);
+	const tabSize = typeof editor?.options.tabSize === 'number' ? editor.options.tabSize : 4;
+	const insertSpaces = editor?.options.insertSpaces !== false;
+	return { pythonStyle: pythonStyle(), indentUnit: insertSpaces ? ' '.repeat(tabSize) : '\t' };
+}
+
+const EXT_TO_LANGUAGE: Record<string, string> = {
+	js: 'javascript', jsx: 'javascriptreact', ts: 'typescript', tsx: 'typescriptreact',
+	dart: 'dart', py: 'python', java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
+	cs: 'csharp', go: 'go', php: 'php',
+};
+
+function languageIdForPath(path: string): string | undefined {
+	return EXT_TO_LANGUAGE[path.split('.').pop()?.toLowerCase() ?? ''];
+}
+
+// Lets us parse a file read from disk without opening it as an editor
+function docFromText(text: string): DocLike {
+	const lines = text.split(/\r?\n/);
+	return { lineCount: lines.length, lineAt: n => ({ text: lines[n] }) };
+}
+
 function updateDiagnostics(
 	doc: vscode.TextDocument,
 	collection: vscode.DiagnosticCollection
 ) {
 	const support = getSupport(doc.languageId);
-	if (!support) {
+	if (!support || !isAnalyzable(doc)) {
 		return;
 	}
 
@@ -51,7 +82,7 @@ function scheduleDiagnostics(
 	doc: vscode.TextDocument,
 	collection: vscode.DiagnosticCollection
 ) {
-	if (!getSupport(doc.languageId)) {
+	if (!getSupport(doc.languageId) || !isAnalyzable(doc)) {
 		return;
 	}
 	const key = doc.uri.toString();
@@ -100,7 +131,7 @@ class DocFixProvider implements vscode.CodeActionProvider {
 			action.edit.insert(
 				doc.uri,
 				new vscode.Position(support.insertLine(doc, lineNo), 0),
-				support.build(indent, fn, { pythonStyle: pythonStyle() })
+				support.build(indent, fn, buildOptions(doc))
 			);
 			actions.push(action);
 		}
@@ -110,7 +141,7 @@ class DocFixProvider implements vscode.CodeActionProvider {
 
 // Builds the Markdown for one file. level 1 = "# title", level 2 = "## title"
 function buildFileDocs(
-	doc: vscode.TextDocument,
+	doc: DocLike,
 	support: LangSupport,
 	title: string,
 	level: number
@@ -178,7 +209,9 @@ async function generateDocs() {
 	await outputDocs(md, undefined);
 }
 
-// Project docs are saved to DOCS.md in the first workspace folder
+// Project docs are saved to DOCS.md in the first workspace folder.
+// Files are read from disk, never opened as editors, so they cannot
+// trigger the missing-comment warnings.
 async function generateProjectDocs() {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	if (!folder) {
@@ -208,11 +241,13 @@ async function generateProjectDocs() {
 				if (rel.endsWith('.d.ts')) {
 					continue;
 				}
-				const doc = await vscode.workspace.openTextDocument(uri);
-				const support = getSupport(doc.languageId);
+				const languageId = languageIdForPath(rel);
+				const support = languageId ? getSupport(languageId) : undefined;
 				if (!support) {
 					continue;
 				}
+				const bytes = await vscode.workspace.fs.readFile(uri);
+				const doc = docFromText(new TextDecoder('utf-8').decode(bytes));
 				const result = buildFileDocs(doc, support, rel, 2);
 				if (result.count === 0) {
 					continue;
@@ -264,7 +299,7 @@ export function activate(context: vscode.ExtensionContext) {
 		editor.edit(edit =>
 			edit.insert(
 				new vscode.Position(support.insertLine(doc, lineNo), 0),
-				support.build(indent, fn, { pythonStyle: pythonStyle() })
+				support.build(indent, fn, buildOptions(doc))
 			)
 		);
 	});

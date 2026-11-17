@@ -10,6 +10,7 @@ export interface ParsedFunction {
 
 export interface BuildOptions {
 	pythonStyle?: 'google' | 'numpy';
+	indentUnit?: string;
 }
 
 export interface LangSupport {
