@@ -1,3 +1,11 @@
+## [0.1.5]
+
+- Fixed Generate Project Documentation opening every file as an editor and flooding the Problems panel.
+- Python docstrings now follow the editor's tab or space indentation.
+- Warnings are only shown for real files, not the Output panel or diff views.
+- Added `npm run test:unit` for fast parser tests.
+- Fixed the copyright line in the LICENSE.
+
 ## [0.1.4]
 
 ### Refactored & Improved
