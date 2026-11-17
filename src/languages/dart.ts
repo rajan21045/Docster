@@ -1,53 +1,36 @@
 import { LangSupport } from '../core/types';
-import { PLACEHOLDER, firstLineAboveDecorators, parseWith, splitParams } from '../core/helpers';
+import { parseWith, splitParams } from '../core/utils';
 
-const DART_PATTERN =
-	/^\s*(?:static\s+)?[\w<>?,.[\]]+\s+(\w+)\s*\(([^)]*)\)\s*(?:async\*?\s*|sync\*\s*)?(?:\{|=>)/;
-const DART_SKIP = ['if', 'for', 'while', 'switch', 'catch', 'else', 'return'];
+const GO_PATTERN = /^func\s+(?:\([^)]*\)\s*)?(\w+)\s*(?:\[[^\]]*\])?\s*\(([^)]*)\)/;
 
-function parseDartParams(raw: string): string[] {
-	return splitParams(raw.replace(/[{}[\]]/g, ''))
-		.map(p => p.split('=')[0].trim())
-		.map(p => p.split(/\s+/).pop() ?? '')
-		.map(p => p.replace(/^this\./, ''))
-		.filter(Boolean);
-}
-
-export const dartSupport: LangSupport = {
-	ids: ['dart'],
+export const goSupport: LangSupport = {
+	ids: ['go'],
 
 	parse(text) {
-		return parseWith(text, DART_PATTERN, DART_SKIP, parseDartParams);
+		return parseWith(text, GO_PATTERN, [], raw =>
+			splitParams(raw)
+				.map(p => p.split(/\s+/)[0].replace(/[^\w]/g, ''))
+				.filter(Boolean)
+		);
 	},
 
-	hasComment(doc, line) {
-		const l = firstLineAboveDecorators(doc, line);
-		return l > 0 && doc.lineAt(l - 1).text.trim().startsWith('///');
-	},
+	hasComment: (lines, line) => line > 0 && lines[line - 1].trim().startsWith('//'),
 
-	build(indent, fn) {
-		let s = `${indent}/// ${PLACEHOLDER}${fn.name}\n`;
-		if (fn.params.length) {
-			s += `${indent}///\n`;
-			s += fn.params.map(p => `${indent}/// - [${p}]:\n`).join('');
-		}
-		return s;
-	},
+	// Go style: the comment starts with the function name
+	build: (indent, fn) => `${indent}// ${fn.name} TODO: describe what ${fn.name} does.\n`,
 
-	insertLine(doc, line) {
-		return firstLineAboveDecorators(doc, line);
-	},
+	insertLine: (_lines, line) => line,
 
-	description(doc, line) {
-		const lines: string[] = [];
-		let i = firstLineAboveDecorators(doc, line) - 1;
-		while (i >= 0 && doc.lineAt(i).text.trim().startsWith('///')) {
-			const clean = doc.lineAt(i).text.trim().replace(/^\/\/\/\s?/, '').trim();
-			if (clean && !clean.startsWith('- [') && !clean.startsWith(PLACEHOLDER)) {
-				lines.unshift(clean);
+	description(lines, line) {
+		const out: string[] = [];
+		let i = line - 1;
+		while (i >= 0 && lines[i].trim().startsWith('//')) {
+			const clean = lines[i].trim().replace(/^\/\/+\s?/, '').trim();
+			if (clean && !clean.includes('TODO: describe')) {
+				out.unshift(clean);
 			}
 			i--;
 		}
-		return lines.join(' ');
+		return out.join(' ');
 	},
 };

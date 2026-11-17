@@ -1,4 +1,5 @@
-import { makeBlockSupport, parseWith, splitParams } from '../core/helpers';
+import { makeBlockSupport } from '../core/block';
+import { parseWith, splitParams } from '../core/utils';
 
 const PHP_PATTERN =
 	/^\s*(?:(?:public|private|protected|static|final|abstract)\s+)*function\s+&?(\w+)\s*\(([^)]*)\)/;
